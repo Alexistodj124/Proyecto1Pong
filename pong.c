@@ -145,3 +145,101 @@ static void announce_winner_and_wait(const char* who) {
     mvprintw((H/2)+1, cx - (int)strlen(msg)/2, "%s", msg);
     refresh();
 }
+
+// LÓGICA EN HILOS
+static void* thread_ball_func(void* arg) {
+    (void)arg;
+    while (g_threads_should_run) {
+        if (!g_paused) {
+            pthread_mutex_lock(&g_lock);
+            // Avanzar
+            g_ball.x += g_ball.vx;
+            g_ball.y += g_ball.vy;
+
+            // Rebotes con techo/piso
+            if (g_ball.y <= g_top + 1) {
+                g_ball.y = g_top + 1;
+                g_ball.vy *= -1.0f;
+            }
+            if (g_ball.y >= g_bottom - 1) {
+                g_ball.y = g_bottom - 1;
+                g_ball.vy *= -1.0f;
+            }
+
+            // Colisión con paleta izquierda
+            int y1 = (int)g_pad1.y;
+            if ((int)g_ball.x == g_pad1.x + 1 && g_ball.vx < 0) {
+                if ((int)g_ball.y >= y1 - PADDLE_LEN/2 && (int)g_ball.y <= y1 + PADDLE_LEN/2) {
+                    g_ball.vx *= -1.0f;
+                    // "Efecto" simple según zona de impacto
+                    int dy = (int)g_ball.y - y1;
+                    g_ball.vy += 0.15f * dy;
+                }
+            }
+            // Colisión con paleta derecha
+            int y2 = (int)g_pad2.y;
+            if ((int)g_ball.x == g_pad2.x - 1 && g_ball.vx > 0) {
+                if ((int)g_ball.y >= y2 - PADDLE_LEN/2 && (int)g_ball.y <= y2 + PADDLE_LEN/2) {
+                    g_ball.vx *= -1.0f;
+                    int dy = (int)g_ball.y - y2;
+                    g_ball.vy += 0.15f * dy;
+                }
+            }
+
+            // Puntos
+            if ((int)g_ball.x <= g_left) {
+                g_score.p2++;
+                g_ball.x = (float)((g_left + g_right) / 2);
+                g_ball.y = (float)((g_top + g_bottom) / 2);
+                g_ball.vx = +BALL_SPEED_X;
+                g_ball.vy = ((rand() % 2) ? 1 : -1) * BALL_SPEED_Y;
+            } else if ((int)g_ball.x >= g_right) {
+                g_score.p1++;
+                g_ball.x = (float)((g_left + g_right) / 2);
+                g_ball.y = (float)((g_top + g_bottom) / 2);
+                g_ball.vx = -BALL_SPEED_X;
+                g_ball.vy = ((rand() % 2) ? 1 : -1) * BALL_SPEED_Y;
+            }
+            pthread_mutex_unlock(&g_lock);
+        }
+        usleep(FRAME_USEC_PLAY);
+    }
+    return NULL;
+}
+
+static void move_paddle(Paddle* p, int dir) {
+    if (dir == -1) p->y -= PADDLE_SPEED;
+    else if (dir == 1) p->y += PADDLE_SPEED;
+    clamp_float(&p->y, g_top + 1 + PADDLE_LEN/2, g_bottom - 1 - PADDLE_LEN/2);
+}
+
+static void* thread_p1_func(void* arg) {
+    (void)arg;
+    while (g_threads_should_run) {
+        if (!g_paused) {
+            pthread_mutex_lock(&g_lock);
+            int dir = 0;
+            if (g_p1_up && !g_p1_down) dir = -1;
+            else if (g_p1_down && !g_p1_up) dir = 1;
+            move_paddle(&g_pad1, dir);
+            pthread_mutex_unlock(&g_lock);
+        }
+        usleep(FRAME_USEC_PLAY);
+    }
+    return NULL;
+}
+static void* thread_p2_func(void* arg) {
+    (void)arg;
+    while (g_threads_should_run) {
+        if (!g_paused) {
+            pthread_mutex_lock(&g_lock);
+            int dir = 0;
+            if (g_p2_up && !g_p2_down) dir = -1;
+            else if (g_p2_down && !g_p2_up) dir = 1;
+            move_paddle(&g_pad2, dir);
+            pthread_mutex_unlock(&g_lock);
+        }
+        usleep(FRAME_USEC_PLAY);
+    }
+    return NULL;
+}
