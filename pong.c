@@ -66,3 +66,31 @@ static void clamp_float(float* v, float mn, float mx) {
     if (*v < mn) *v = mn;
     if (*v > mx) *v = mx;
 }
+static void reset_world() {
+    int H, W;
+    getmaxyx(stdscr, H, W);
+
+    // Score e instrucciones
+    g_top = 2;
+    g_bottom = H - 2;
+    g_left = 2;
+    g_right = W - 3;
+    g_midX = W / 2;
+
+    // Paletas
+    g_pad1.x = g_left + 2;
+    g_pad2.x = g_right - 2;
+    g_pad1.y = (g_top + g_bottom) / 2;
+    g_pad2.y = (g_top + g_bottom) / 2;
+
+    // Pelota
+    g_ball.x = (float)((g_left + g_right) / 2);
+    g_ball.y = (float)((g_top + g_bottom) / 2);
+    g_ball.vx = ((rand() % 2) ? 1.0f : -1.0f) * BALL_SPEED_X;
+    g_ball.vy = ((rand() % 2) ? 1.0f : -1.0f) * BALL_SPEED_Y;
+
+    g_score.p1 = 0;
+    g_score.p2 = 0;
+
+    g_paused = false;
+}
