@@ -94,3 +94,54 @@ static void reset_world() {
 
     g_paused = false;
 }
+tic void draw_borders_and_center() {
+    // Marco
+    for (int x = g_left; x <= g_right; ++x) {
+        mvaddch(g_top, x, '-');
+        mvaddch(g_bottom, x, '-');
+    }
+    for (int y = g_top; y <= g_bottom; ++y) {
+        mvaddch(y, g_left, '|');
+        mvaddch(y, g_right, '|');
+    }
+    // Línea central
+    for (int y = g_top + 1; y < g_bottom; y += 2) {
+        mvaddch(y, g_midX, ':');
+    }
+}
+
+static void draw_score() {
+    mvprintw(0, 2, "P1: %d   P2: %d   (P: pausa, Q: menu)", g_score.p1, g_score.p2);
+}
+
+static void draw_paddles_and_ball() {
+    // Paleta 1
+    int y1 = (int)g_pad1.y;
+    for (int k = -PADDLE_LEN/2; k <= PADDLE_LEN/2; ++k) {
+        int yy = y1 + k;
+        if (yy > g_top && yy < g_bottom) {
+            mvaddch(yy, g_pad1.x, '|');
+        }
+    }
+    // Paleta 2
+    int y2 = (int)g_pad2.y;
+    for (int k = -PADDLE_LEN/2; k <= PADDLE_LEN/2; ++k) {
+        int yy = y2 + k;
+        if (yy > g_top && yy < g_bottom) {
+            mvaddch(yy, g_pad2.x, '|');
+        }
+    }
+    // Pelota
+    mvaddch((int)g_ball.y, (int)g_ball.x, 'O');
+}
+
+static void announce_winner_and_wait(const char* who) {
+    const char* msg = "(ENTER) Reiniciar   (Q) Menu";
+    int H, W; getmaxyx(stdscr, H, W);
+    int cx = W/2;
+    attron(A_BOLD);
+    mvprintw((H/2)-1, cx - (int)strlen(who)/2, "%s", who);
+    attroff(A_BOLD);
+    mvprintw((H/2)+1, cx - (int)strlen(msg)/2, "%s", msg);
+    refresh();
+}
