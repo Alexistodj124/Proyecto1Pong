@@ -243,3 +243,128 @@ static void* thread_p2_func(void* arg) {
     }
     return NULL;
 }
+// PANTALLAS 
+static int menu_screen() {
+    const char* items[] = {
+        "Iniciar partida (J1: W/S, J2: Flechas)",
+        "Instrucciones",
+        "Puntajes destacados (WIP)",
+        "Salir"
+    };
+    const int N = sizeof(items) / sizeof(items[0]);
+    int sel = 0;
+
+    nodelay(stdscr, FALSE);
+    keypad(stdscr, TRUE);
+    while (1) {
+        clear();
+        int H, W; getmaxyx(stdscr, H, W);
+        mvprintw(0, 2, "PONG - FASE 02  (Usa Flechas y ENTER)");
+        for (int i = 0; i < N; ++i) {
+            if (i == sel) attron(A_REVERSE);
+            mvprintw(3 + i, 4, "%s", items[i]);
+            if (i == sel) attroff(A_REVERSE);
+        }
+        mvprintw(H-2, 2, "Q para salir rapido");
+        refresh();
+
+        int ch = getch();
+        if (ch == KEY_UP) { sel = (sel - 1 + N) % N; }
+        else if (ch == KEY_DOWN) { sel = (sel + 1) % N; }
+        else if (ch == '\n' || ch == KEY_ENTER) { return sel; }
+        else if (ch == 'q' || ch == 'Q') { return 3; }
+    }
+}
+
+static void instructions_screen() {
+    nodelay(stdscr, FALSE);
+    keypad(stdscr, TRUE);
+    while (1) {
+        clear();
+        mvprintw(0, 2, "INSTRUCCIONES");
+        mvprintw(2, 2, "Objetivo: Evita que la pelota pase tu borde. Gana quien llegue a %d.", SCORE_TO_WIN);
+        mvprintw(4, 2, "Controles:");
+        mvprintw(5, 4, "Jugador 1: W (arriba), S (abajo)");
+        mvprintw(6, 4, "Jugador 2: Flecha UP (arriba), Flecha DOWN (abajo)");
+        mvprintw(7, 4, "Globales en juego: P (pausa), Q (menu)");
+        mvprintw(9, 2, "Presiona ENTER para volver al menu.");
+        refresh();
+        int ch = getch();
+        if (ch == '\n' || ch == KEY_ENTER) break;
+    }
+}
+
+static Scene play_screen() {
+    nodelay(stdscr, TRUE);
+    keypad(stdscr, TRUE);
+    timeout(0);
+
+    // Resetear
+    reset_world();
+    g_threads_should_run = true;
+    pthread_create(&th_ball, NULL, thread_ball_func, NULL);
+    pthread_create(&th_p1, NULL, thread_p1_func, NULL);
+    pthread_create(&th_p2, NULL, thread_p2_func, NULL);
+
+    Scene next = SC_MENU;
+    while (!g_exit_requested) {
+        // INPUT
+        int ch;
+        while ((ch = getch()) != ERR) {
+            if (ch == 'q' || ch == 'Q') { next = SC_MENU; goto END_PLAY; }
+            if (ch == 'p' || ch == 'P') { g_paused = !g_paused; }
+            // J1
+            if (ch == 'w' || ch == 'W') g_p1_up = 1;
+            if (ch == 's' || ch == 'S') g_p1_down = 1;
+            if (ch == KEY_UP) g_p2_up = 1;
+            if (ch == KEY_DOWN) g_p2_down = 1;
+
+            if (ch == 'w' || ch == 'W') g_p1_down = 0;
+            if (ch == 's' || ch == 'S') g_p1_up = 0;
+            if (ch == KEY_UP) g_p2_down = 0;
+            if (ch == KEY_DOWN) g_p2_up = 0;
+        }
+
+        pthread_mutex_lock(&g_lock);
+        clear();
+        draw_score();
+        draw_borders_and_center();
+        draw_paddles_and_ball();
+
+        if (g_paused) {
+            attron(A_BOLD);
+            mvprintw((g_top + g_bottom)/2, g_midX - 2, "PAUSA");
+            attroff(A_BOLD);
+        }
+        // Ganador
+        if (g_score.p1 >= SCORE_TO_WIN || g_score.p2 >= SCORE_TO_WIN) {
+            const char* who = (g_score.p1 > g_score.p2) ? "Gana JUGADOR 1" : "Gana JUGADOR 2";
+            announce_winner_and_wait(who);
+            pthread_mutex_unlock(&g_lock);
+            // Esperar acción
+            nodelay(stdscr, FALSE);
+            int c;
+            while ((c = getch())) {
+                if (c == 'q' || c == 'Q') { next = SC_MENU; goto END_PLAY; }
+                if (c == '\n' || c == KEY_ENTER) {
+                    // Reiniciar partida
+                    nodelay(stdscr, TRUE);
+                    reset_world();
+                    break;
+                }
+            }
+        } else {
+            refresh();
+            pthread_mutex_unlock(&g_lock);
+        }
+        usleep(FRAME_USEC_PLAY);
+    }
+
+END_PLAY:
+    g_threads_should_run = false;
+    usleep(2 * FRAME_USEC_PLAY);
+    pthread_join(th_ball, NULL);
+    pthread_join(th_p1, NULL);
+    pthread_join(th_p2, NULL);
+    return next;
+}
