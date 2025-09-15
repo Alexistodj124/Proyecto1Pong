@@ -368,3 +368,35 @@ END_PLAY:
     pthread_join(th_p2, NULL);
     return next;
 }
+
+// MAIN
+int main(void) {
+    srand((unsigned int)time(NULL));
+
+    initscr();
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+    curs_set(0);
+
+    Scene scene = SC_MENU;
+    while (!g_exit_requested) {
+        if (scene == SC_MENU) {
+            int sel = menu_screen();
+            if      (sel == 0) scene = SC_PLAYING;
+            else if (sel == 1) { instructions_screen(); scene = SC_MENU; }
+            else if (sel == 2) { /* Placeholder puntajes */ scene = SC_MENU; }
+            else if (sel == 3) { g_exit_requested = true; }
+        }
+        else if (scene == SC_INSTR) {
+            instructions_screen();
+            scene = SC_MENU;
+        }
+        else if (scene == SC_PLAYING) {
+            scene = play_screen();
+        }
+    }
+
+    endwin();
+    return 0;
+}
