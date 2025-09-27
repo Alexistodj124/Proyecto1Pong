@@ -372,6 +372,38 @@ static int menu_screen() {
     }
 }
 
+//selección de modo
+static int mode_screen() {
+    const char* items[] = {
+        "Jugador vs Jugador",
+        "Jugador vs Computadora",
+        "Computadora vs Computadora",
+    };
+    const int N = sizeof(items) / sizeof(items[0]);
+    int sel = 0;
+
+    nodelay(stdscr, FALSE);
+    keypad(stdscr, TRUE);
+    while (1) {
+        clear();
+        int H, W; getmaxyx(stdscr, H, W);
+        mvprintw(0, 2, "Selecciona un modo de juego  (Usa Flechas y ENTER)");
+        for (int i = 0; i < N; ++i) {
+            if (i == sel) attron(A_REVERSE);
+            mvprintw(3 + i, 4, "%s", items[i]);
+            if (i == sel) attroff(A_REVERSE);
+        }
+        mvprintw(H-2, 2, "Q para salir rapido");
+        refresh();
+
+        int ch = getch();
+        if (ch == KEY_UP) { sel = (sel - 1 + N) % N; }
+        else if (ch == KEY_DOWN) { sel = (sel + 1) % N; }
+        else if (ch == '\n' || ch == KEY_ENTER) { return sel; }
+        else if (ch == 'q' || ch == 'Q') { return 3; }
+    }
+}
+
 static void instructions_screen() {
     nodelay(stdscr, FALSE);
     keypad(stdscr, TRUE);
@@ -493,7 +525,19 @@ int main(void) {
     while (!g_exit_requested) {
         if (scene == SC_MENU) {
             int sel = menu_screen();
-            if      (sel == 0) { input_names_screen(); scene = SC_PLAYING; }
+            if (sel == 0) {
+                int mode = mode_screen();
+                if (mode == 0) { // Jugador vs Jugador
+                    scene = SC_PLAYING;
+                } else if (mode == 1) { // Jugador vs Computadora
+                    input_names_screen();
+                    scene = SC_PLAYING;
+                } else if (mode == 2) { // Computadora vs Computadora
+                    scene = SC_PLAYING;
+                } else if (mode == 3) { // Q para salir rapido
+                    scene = SC_MENU;
+                }
+            }
             else if (sel == 1) { instructions_screen(); scene = SC_MENU; }
             else if (sel == 2) { leaderboard_screen(); scene = SC_MENU; }
             else if (sel == 3) { g_exit_requested = true; }
@@ -510,3 +554,4 @@ int main(void) {
     endwin();
     return 0;
 }
+
