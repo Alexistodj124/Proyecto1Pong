@@ -130,19 +130,50 @@ static void draw_score() {
              g_name1, g_score.p1, g_name2, g_score.p2);
 }
 
+//Dibujar las paletas y la pelota con colores
 static void draw_paddles_and_ball() {
+    //Paleta 1
     int y1 = (int)g_pad1.y;
+    attron(COLOR_PAIR(2) | A_BOLD);
     for (int k = -PADDLE_LEN/2; k <= PADDLE_LEN/2; ++k) {
         int yy = y1 + k;
         if (yy > g_top && yy < g_bottom) mvaddch(yy, g_pad1.x, '|');
     }
+    attroff(COLOR_PAIR(2) | A_BOLD);
+
+    //Paleta 2
     int y2 = (int)g_pad2.y;
+    attron(COLOR_PAIR(3) | A_BOLD);
     for (int k = -PADDLE_LEN/2; k <= PADDLE_LEN/2; ++k) {
         int yy = y2 + k;
         if (yy > g_top && yy < g_bottom) mvaddch(yy, g_pad2.x, '|');
     }
+    attroff(COLOR_PAIR(3) | A_BOLD);
+
+    //Para la pelota
+    attron(COLOR_PAIR(1) | A_BOLD);
     mvaddch((int)g_ball.y, (int)g_ball.x, 'O');
+    attroff(COLOR_PAIR(1) | A_BOLD);
 }
+
+//Para el menu
+void draw_menu_item(int y, int W, const char* text, bool selected) {
+    int len = strlen(text);
+    int box_w = len + 8; 
+    int x = (W - box_w) / 2;
+    int inner_w = box_w - 2;
+    int left_pad = (inner_w - len) / 2;
+    int right_pad = inner_w - len - left_pad;
+
+    if (selected) attron(A_REVERSE);
+    mvprintw(y, x, "+-%.*s-+", inner_w, "--------------------------------");
+    mvprintw(y+1, x, "|%*s%s%*s|", left_pad, "", text, right_pad, "");
+
+    mvprintw(y+2, x, "+-%.*s-+", inner_w, "--------------------------------");
+
+    if (selected) attroff(A_REVERSE);
+}
+
 
 // LEADERBOARD
 static void ensure_file_exists() {
@@ -342,10 +373,10 @@ static void input_names_screen() {
 
 static int menu_screen() {
     const char* items[] = {
-        "Iniciar partida",
-        "Instrucciones",
-        "Puntajes destacados",
-        "Salir"
+        "JUGAR",
+        "INSTRUCCIONES",
+        "PUNTAJES DESTACADOS",
+        "SALIR"
     };
     const int N = sizeof(items) / sizeof(items[0]);
     int sel = 0;
@@ -355,15 +386,26 @@ static int menu_screen() {
     while (1) {
         clear();
         int H, W; getmaxyx(stdscr, H, W);
-        mvprintw(0, 2, "PONG - FASE 02  (Usa Flechas y ENTER)");
-        for (int i = 0; i < N; ++i) {
-            if (i == sel) attron(A_REVERSE);
-            mvprintw(3 + i, 4, "%s", items[i]);
-            if (i == sel) attroff(A_REVERSE);
-        }
-        mvprintw(H-2, 2, "Q para salir rapido");
-        refresh();
 
+        // TÍTULO (ASCII)
+        mvprintw(2, (W-28)/2, "  ____   ____  _   _  ____ ");
+        mvprintw(3, (W-28)/2, " |  _ \\ / __ \\| \\ | |/ ___|");
+        mvprintw(4, (W-28)/2, " | |_) | |  | |  \\| | |     ");
+        mvprintw(5, (W-28)/2, " |  __/| |  | | . ` | | ___");
+        mvprintw(6, (W-28)/2, " | |   | |__| | |\\  | |_| |");
+        mvprintw(7, (W-28)/2, " |_|    \\____/|_| \\_|\\____|");
+
+        // INSTRUCCIONES
+        mvprintw(9, (W - strlen("Usa Flechas UP/DOWN y ENTER"))/2, "Usa Flechas UP/DOWN y ENTER");
+
+        for (int i = 0; i < N; ++i) {
+            draw_menu_item(11 + i*3, W, items[i], i == sel);
+        }
+
+        // TEXTO DE ABAJO
+        mvprintw(H-2, (W - strlen("Q para salir rapido"))/2, "Q para salir rapido");
+
+        refresh();
         int ch = getch();
         if (ch == KEY_UP) { sel = (sel - 1 + N) % N; }
         else if (ch == KEY_DOWN) { sel = (sel + 1) % N; }
@@ -372,12 +414,13 @@ static int menu_screen() {
     }
 }
 
+
 //selección de modo
 static int mode_screen() {
     const char* items[] = {
-        "Jugador vs Jugador",
-        "Jugador vs Computadora",
-        "Computadora vs Computadora",
+        "JUGADOR VS JUGADOR",
+        "JUGADOR VS COMPUTADORA",
+        "COMPUTADORA VS COMPUTADORA",
     };
     const int N = sizeof(items) / sizeof(items[0]);
     int sel = 0;
@@ -388,6 +431,7 @@ static int mode_screen() {
         clear();
         int H, W; getmaxyx(stdscr, H, W);
         mvprintw(0, 2, "Selecciona un modo de juego  (Usa Flechas y ENTER)");
+
         for (int i = 0; i < N; ++i) {
             if (i == sel) attron(A_REVERSE);
             mvprintw(3 + i, 4, "%s", items[i]);
@@ -516,6 +560,18 @@ END_PLAY:
 int main(void) {
     srand((unsigned int)time(NULL));
     initscr();
+
+    //Colores
+    if (has_colors()) {
+    start_color();
+    use_default_colors();
+    init_pair(1, COLOR_GREEN,   -1);  // Pelota
+    init_pair(2, COLOR_RED, -1);  // Paleta 1
+    init_pair(3, COLOR_BLUE,  -1);  // Paleta 2
+    init_pair(4, COLOR_YELLOW,-1);  // Textos
+    init_pair(5, COLOR_WHITE, COLOR_BLACK); // Fondo con borde negro
+}
+
     cbreak();
     noecho();
     keypad(stdscr, TRUE);
