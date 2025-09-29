@@ -112,25 +112,44 @@ static void reset_world() {
 }
 
 static void draw_borders_and_center() {
-    for (int x = g_left; x <= g_right; ++x) {
+    mvaddch(g_top, g_left, '+');
+    mvaddch(g_top, g_right, '+');
+    mvaddch(g_bottom, g_left, '+');
+    mvaddch(g_bottom, g_right, '+');
+  
+    for (int x = g_left + 1; x < g_right; ++x) {
         mvaddch(g_top, x, '-');
         mvaddch(g_bottom, x, '-');
     }
-    for (int y = g_top; y <= g_bottom; ++y) {
+
+    for (int y = g_top + 1; y < g_bottom; ++y) {
         mvaddch(y, g_left, '|');
         mvaddch(y, g_right, '|');
     }
+
     for (int y = g_top + 1; y < g_bottom; y += 2) {
         mvaddch(y, g_midX, ':');
     }
 }
 
 static void draw_score() {
-    mvprintw(0, 2, "%s: %d   %s: %d   (P: pausa, Q: menu)",
-             g_name1, g_score.p1, g_name2, g_score.p2);
+    int H, W;
+    getmaxyx(stdscr, H, W);
+    mvprintw(0, 2, "%s: %d", g_name1, g_score.p1);
+
+    char right_buf[64];
+    snprintf(right_buf, sizeof(right_buf), "%s: %d", g_name2, g_score.p2);
+    mvprintw(0, W - strlen(right_buf) - 2, "%s", right_buf);
+
+    attron(A_BOLD | COLOR_PAIR(5));
+    mvprintw(0, (W - strlen("PONG")) / 2, "%s", "PONG");
+    attroff(A_BOLD | COLOR_PAIR(5));
+
+    const char* instr = "(P: pausa, Q: menu)";
+    mvprintw(1, (W - (int)strlen(instr)) / 2, "%s", instr);
 }
 
-//Dibujar las paletas y la pelota con colores
+//Dibujar las paletas y la pelota 
 static void draw_paddles_and_ball() {
     //Paleta 1
     int y1 = (int)g_pad1.y;
@@ -172,9 +191,6 @@ void draw_menu_item(int y, int W, const char* text, bool selected) {
 
     if (selected) attroff(A_REVERSE);
 }
-
-
-
 
 // LEADERBOARD
 static void ensure_file_exists() {
@@ -362,12 +378,14 @@ static int menu_screen() {
         int H, W; getmaxyx(stdscr, H, W);
 
         // TÍTULO (ASCII)
+        attron(COLOR_PAIR(5) | A_BOLD);
         mvprintw(2, (W-28)/2, "  ____   ____  _   _  ____ ");
         mvprintw(3, (W-28)/2, " |  _ \\ / __ \\| \\ | |/ ___|");
         mvprintw(4, (W-28)/2, " | |_) | |  | |  \\| | |     ");
         mvprintw(5, (W-28)/2, " |  __/| |  | | . ` | | ___");
         mvprintw(6, (W-28)/2, " | |   | |__| | |\\  | |_| |");
         mvprintw(7, (W-28)/2, " |_|    \\____/|_| \\_|\\____|");
+        attroff(COLOR_PAIR(5) | A_BOLD);
 
         // INSTRUCCIONES
         mvprintw(9, (W - strlen("Usa Flechas UP/DOWN y ENTER"))/2, "Usa Flechas UP/DOWN y ENTER");
@@ -589,7 +607,8 @@ int main(void) {
     init_pair(2, COLOR_RED, -1);  // Paleta 1
     init_pair(3, COLOR_BLUE,  -1);  // Paleta 2
     init_pair(4, COLOR_YELLOW,-1);  // Textos
-    init_pair(5, COLOR_WHITE, COLOR_BLACK); // Fondo con borde negro
+    init_pair(5, COLOR_MAGENTA,-1);  // Textos
+    init_pair(6, COLOR_WHITE, COLOR_BLACK); // Fondo con borde negro
 }
 
     cbreak();
