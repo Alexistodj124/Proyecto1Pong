@@ -168,11 +168,12 @@ void draw_menu_item(int y, int W, const char* text, bool selected) {
     if (selected) attron(A_REVERSE);
     mvprintw(y, x, "+-%.*s-+", inner_w, "--------------------------------");
     mvprintw(y+1, x, "|%*s%s%*s|", left_pad, "", text, right_pad, "");
-
     mvprintw(y+2, x, "+-%.*s-+", inner_w, "--------------------------------");
 
     if (selected) attroff(A_REVERSE);
 }
+
+
 
 
 // LEADERBOARD
@@ -214,33 +215,6 @@ static void append_entry(const Entry* e) {
     fclose(f);
 }
 
-static void leaderboard_screen() {
-    nodelay(stdscr, FALSE);
-    keypad(stdscr, TRUE);
-    Entry entries[MAX_LEADER_ENTRIES];
-    int n = load_entries(entries, MAX_LEADER_ENTRIES);
-    qsort(entries, n, sizeof(Entry), cmp_entry);
-
-    int topN = (n < 10) ? n : 10;
-
-    while (1) {
-        clear();
-        mvprintw(0, 2, "PUNTAJES DESTACADOS (Top %d)  -  ENTER para volver", topN);
-        mvprintw(2, 2, "%-3s %-24s %-6s %-24s %-10s", "#", "Ganador", "Marcador", "Perdedor", "Fecha");
-        mvhline(3, 2, '-', 70);
-        for (int i = 0; i < topN; ++i) {
-            char datebuf[20];
-            struct tm* tmv = localtime(&entries[i].ts);
-            strftime(datebuf, sizeof(datebuf), "%Y-%m-%d", tmv);
-            mvprintw(4 + i, 2, "%-3d %-24s %2d-%-3d %-24s %-10s",
-                     i+1, entries[i].winner, entries[i].winScore, entries[i].loseScore, entries[i].loser, datebuf);
-        }
-        if (n == 0) mvprintw(5, 2, "Aun no hay partidas registradas. Juega una y se guardara aqui.");
-        refresh();
-        int ch = getch();
-        if (ch == '\n' || ch == KEY_ENTER) break;
-    }
-}
 
 // INPUT DE TEXTO
 static void read_line_ncurses(char* out, int maxlen, int y, int x) {
@@ -430,16 +404,18 @@ static int mode_screen() {
     while (1) {
         clear();
         int H, W; getmaxyx(stdscr, H, W);
-        mvprintw(0, 2, "Selecciona un modo de juego  (Usa Flechas y ENTER)");
-
+        //TITULO
+        mvprintw(2, (W - strlen("SELECCIONA UN MODO DE JUEGO")) / 2, "SELECCIONA UN MODO DE JUEGO");
+        // INSTRUCCIONES
+        mvprintw(4, (W - strlen("Usa Flechas UP/DOWN y ENTER"))/2, "Usa Flechas UP/DOWN y ENTER");
+        //OPCIONES
+        int start_y = H/2 - (N * 2); // posicionar aprox. en el centro
         for (int i = 0; i < N; ++i) {
-            if (i == sel) attron(A_REVERSE);
-            mvprintw(3 + i, 4, "%s", items[i]);
-            if (i == sel) attroff(A_REVERSE);
+            draw_menu_item(start_y + i*4, W, items[i], i == sel);
         }
-        mvprintw(H-2, 2, "Q para salir rapido");
+        // TEXTO DE ABAJO
+        mvprintw(H-2, (W - strlen("Q para salir rapido"))/2, "Q para salir rapido");
         refresh();
-
         int ch = getch();
         if (ch == KEY_UP) { sel = (sel - 1 + N) % N; }
         else if (ch == KEY_DOWN) { sel = (sel + 1) % N; }
@@ -447,24 +423,68 @@ static int mode_screen() {
         else if (ch == 'q' || ch == 'Q') { return 3; }
     }
 }
-
+// Pantalla de instrucciones
 static void instructions_screen() {
     nodelay(stdscr, FALSE);
     keypad(stdscr, TRUE);
     while (1) {
         clear();
-        mvprintw(0, 2, "INSTRUCCIONES");
-        mvprintw(2, 2, "Objetivo: Evita que la pelota pase tu borde. Gana quien llegue a %d.", SCORE_TO_WIN);
-        mvprintw(4, 2, "Controles:");
-        mvprintw(5, 4, "%s: W (arriba), S (abajo)", g_name1);
-        mvprintw(6, 4, "%s: Flecha UP (arriba), Flecha DOWN (abajo)", g_name2);
-        mvprintw(7, 4, "Globales en juego: P (pausa), Q (menu)");
-        mvprintw(9, 2, "Presiona ENTER para volver al menu.");
+        int H, W;
+        getmaxyx(stdscr, H, W);
+        // ---- Título ----
+        attron(COLOR_PAIR(4) | A_BOLD);
+        mvprintw(2, (W - strlen("INSTRUCCIONES")) / 2, "%s", "INSTRUCCIONES");
+        attroff(COLOR_PAIR(4) | A_BOLD);
+        // ---- Objetivo ----
+        attron(COLOR_PAIR(3) | A_BOLD);
+        mvprintw(5, (W - 40) / 2, "%s", "OBJETIVO");
+        attroff(COLOR_PAIR(3) | A_BOLD);
+        mvprintw(7, (W - 40) / 2, "Evita que la pelota pase tu borde.");
+        mvprintw(8, (W - 40) / 2, "Gana quien llegue a %d puntos.", SCORE_TO_WIN);
+        // ---- Controles ----
+        attron(COLOR_PAIR(3) | A_BOLD);
+        mvprintw(11, (W - 40) / 2, "%s", "CONTROLES");
+        attroff(COLOR_PAIR(3) | A_BOLD);
+        mvprintw(13, (W - 40) / 2, "%s:  W (arriba), S (abajo)", g_name1);
+        mvprintw(14, (W - 40) / 2, "%s:  Flecha UP / DOWN", g_name2);
+        mvprintw(15, (W - 40) / 2, "Globales:  P (pausa), Q (menu)");
+
+        mvprintw(H - 3, (W - strlen("Presiona ENTER para volver al menu")) / 2, "%s", "Presiona ENTER para volver al menu");
+        refresh();
+
+        int ch = getch();
+        if (ch == '\n' || ch == KEY_ENTER) break;
+    }
+}
+
+static void leaderboard_screen() {
+    nodelay(stdscr, FALSE);
+    keypad(stdscr, TRUE);
+    Entry entries[MAX_LEADER_ENTRIES];
+    int n = load_entries(entries, MAX_LEADER_ENTRIES);
+    qsort(entries, n, sizeof(Entry), cmp_entry);
+
+    int topN = (n < 10) ? n : 10;
+
+    while (1) {
+        clear();
+        mvprintw(0, 2, "PUNTAJES DESTACADOS (Top %d)  -  ENTER para volver", topN);
+        mvprintw(2, 2, "%-3s %-24s %-6s %-24s %-10s", "#", "Ganador", "Marcador", "Perdedor", "Fecha");
+        mvhline(3, 2, '-', 70);
+        for (int i = 0; i < topN; ++i) {
+            char datebuf[20];
+            struct tm* tmv = localtime(&entries[i].ts);
+            strftime(datebuf, sizeof(datebuf), "%Y-%m-%d", tmv);
+            mvprintw(4 + i, 2, "%-3d %-24s %2d-%-3d %-24s %-10s",
+                     i+1, entries[i].winner, entries[i].winScore, entries[i].loseScore, entries[i].loser, datebuf);
+        }
+        if (n == 0) mvprintw(5, 2, "Aun no hay partidas registradas. Juega una y se guardara aqui.");
         refresh();
         int ch = getch();
         if (ch == '\n' || ch == KEY_ENTER) break;
     }
 }
+
 
 static void announce_winner_and_wait(const char* who) {
     int H, W; getmaxyx(stdscr, H, W);
