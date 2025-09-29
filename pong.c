@@ -1,4 +1,4 @@
-// PONG
+// PONG - CON MODO CPU VS JUGADOR
 // CC3086 - Programación de microprocesadores
 // Requiere: ncurses y pthreads
 // Compilar: gcc pong.c -o pong -lncurses -lpthread
@@ -25,6 +25,10 @@
 #define NAME_MAXLEN 24
 #define LEADERBOARD_FILE "pong_scores.txt"
 #define MAX_LEADER_ENTRIES 200
+
+// Configuración de dificultad CPU
+#define CPU_REACTION_DELAY 3  // Frames de delay para la CPU
+#define CPU_ERROR_MARGIN 1.5f // Margen de error en la predicción
 
 // ESTADO GLOBAL
 typedef struct {
@@ -57,6 +61,13 @@ typedef enum {
     SC_LEADER
 } Scene;
 
+// Modos de juego
+typedef enum {
+    MODE_PVP = 0,      // Jugador vs Jugador
+    MODE_PVC,          // Jugador vs Computadora
+    MODE_CVC           // Computadora vs Computadora
+} GameMode;
+
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static volatile bool g_threads_should_run = false;
 static volatile bool g_paused = false;
@@ -77,7 +88,11 @@ static pthread_t th_ball, th_p1, th_p2;
 
 // Nombres
 static char g_name1[NAME_MAXLEN+1] = "Jugador 1";
-static char g_name2[NAME_MAXLEN+1] = "Jugador 2";
+static char g_name2[NAME_MAXLEN+1] = "CPU";
+
+// Modo de juego actual
+static GameMode g_game_mode = MODE_PVP;
+static int g_cpu_delay_counter = 0;
 
 // UTILIDADES
 static void clamp_float(float* v, float mn, float mx) {
@@ -89,26 +104,24 @@ static void reset_world() {
     int H, W;
     getmaxyx(stdscr, H, W);
     
-    // Score e instrucciones
     g_top = 2;
     g_bottom = H - 2;
     g_left = 2;
     g_right = W - 3;
     g_midX = W / 2;
 
-    // Paletas
     g_pad1.x = g_left + 2;
     g_pad2.x = g_right - 2;
     g_pad1.y = (g_top + g_bottom) / 2;
     g_pad2.y = (g_top + g_bottom) / 2;
 
-    // Pelota
     g_ball.x = (float)((g_left + g_right) / 2);
     g_ball.y = (float)((g_top + g_bottom) / 2);
     g_ball.vx = ((rand() % 2) ? 1.0f : -1.0f) * BALL_SPEED_X;
     g_ball.vy = ((rand() % 2) ? 1.0f : -1.0f) * BALL_SPEED_Y;
     g_score.p1 = 0; g_score.p2 = 0;
     g_paused = false;
+    g_cpu_delay_counter = 0;
 }
 
 static void draw_borders_and_center() {
@@ -149,9 +162,7 @@ static void draw_score() {
     mvprintw(1, (W - (int)strlen(instr)) / 2, "%s", instr);
 }
 
-//Dibujar las paletas y la pelota 
 static void draw_paddles_and_ball() {
-    //Paleta 1
     int y1 = (int)g_pad1.y;
     attron(COLOR_PAIR(2) | A_BOLD);
     for (int k = -PADDLE_LEN/2; k <= PADDLE_LEN/2; ++k) {
@@ -160,7 +171,6 @@ static void draw_paddles_and_ball() {
     }
     attroff(COLOR_PAIR(2) | A_BOLD);
 
-    //Paleta 2
     int y2 = (int)g_pad2.y;
     attron(COLOR_PAIR(3) | A_BOLD);
     for (int k = -PADDLE_LEN/2; k <= PADDLE_LEN/2; ++k) {
@@ -169,13 +179,11 @@ static void draw_paddles_and_ball() {
     }
     attroff(COLOR_PAIR(3) | A_BOLD);
 
-    //Para la pelota
     attron(COLOR_PAIR(1) | A_BOLD);
     mvaddch((int)g_ball.y, (int)g_ball.x, 'O');
     attroff(COLOR_PAIR(1) | A_BOLD);
 }
 
-//Para el menu
 void draw_menu_item(int y, int W, const char* text, bool selected) {
     int len = strlen(text);
     int box_w = len + 8; 
@@ -231,7 +239,6 @@ static void append_entry(const Entry* e) {
     fclose(f);
 }
 
-
 // INPUT DE TEXTO
 static void read_line_ncurses(char* out, int maxlen, int y, int x) {
     int len = 0;
@@ -261,7 +268,37 @@ static void read_line_ncurses(char* out, int maxlen, int y, int x) {
     if (len == 0) strncpy(out, "Jugador", maxlen);
 }
 
-// LÓGICA
+// ============ LÓGICA DE IA PARA CPU ============
+
+// Calcula hacia dónde debe moverse la CPU
+static int cpu_calculate_direction(Paddle* cpu_paddle, Ball ball) {
+    // Solo reaccionar si la pelota viene hacia la CPU
+    bool ball_coming = (cpu_paddle->x > g_midX && ball.vx > 0) || 
+                       (cpu_paddle->x < g_midX && ball.vx < 0);
+    
+    if (!ball_coming) {
+        // Volver al centro cuando la pelota no viene hacia nosotros
+        float center = (g_top + g_bottom) / 2.0f;
+        if (cpu_paddle->y < center - 1.0f) return 1;
+        if (cpu_paddle->y > center + 1.0f) return -1;
+        return 0;
+    }
+    
+    // Agregar margen de error aleatorio para hacer la CPU más humana
+    float target_y = ball.y;
+    if (rand() % 100 < 30) { // 30% de chance de error
+        target_y += ((rand() % 2) ? 1 : -1) * CPU_ERROR_MARGIN;
+    }
+    
+    // Decidir dirección
+    float diff = target_y - cpu_paddle->y;
+    if (diff < -0.5f) return -1;
+    if (diff > 0.5f) return 1;
+    return 0;
+}
+
+// ============ LÓGICA DE THREADS ============
+
 static void* thread_ball_func(void* arg) {
     (void)arg;
     while (g_threads_should_run) {
@@ -269,8 +306,17 @@ static void* thread_ball_func(void* arg) {
             pthread_mutex_lock(&g_lock);
             g_ball.x += g_ball.vx;
             g_ball.y += g_ball.vy;
-            if (g_ball.y <= g_top + 1) { g_ball.y = g_top + 1; g_ball.vy *= -1.0f; }
-            if (g_ball.y >= g_bottom - 1) { g_ball.y = g_bottom - 1; g_ball.vy *= -1.0f; }
+            
+            if (g_ball.y <= g_top + 1) { 
+                g_ball.y = g_top + 1; 
+                g_ball.vy *= -1.0f; 
+            }
+            if (g_ball.y >= g_bottom - 1) { 
+                g_ball.y = g_bottom - 1; 
+                g_ball.vy *= -1.0f; 
+            }
+            
+            // Colisión con paleta 1
             int y1 = (int)g_pad1.y;
             if ((int)g_ball.x == g_pad1.x + 1 && g_ball.vx < 0) {
                 if ((int)g_ball.y >= y1 - PADDLE_LEN/2 && (int)g_ball.y <= y1 + PADDLE_LEN/2) {
@@ -279,6 +325,8 @@ static void* thread_ball_func(void* arg) {
                     g_ball.vy += 0.15f * dy;
                 }
             }
+            
+            // Colisión con paleta 2
             int y2 = (int)g_pad2.y;
             if ((int)g_ball.x == g_pad2.x - 1 && g_ball.vx > 0) {
                 if ((int)g_ball.y >= y2 - PADDLE_LEN/2 && (int)g_ball.y <= y2 + PADDLE_LEN/2) {
@@ -287,6 +335,8 @@ static void* thread_ball_func(void* arg) {
                     g_ball.vy += 0.15f * dy;
                 }
             }
+            
+            // Puntuación
             if ((int)g_ball.x <= g_left) {
                 g_score.p2++;
                 g_ball.x = (float)((g_left + g_right) / 2);
@@ -318,9 +368,21 @@ static void* thread_p1_func(void* arg) {
     while (g_threads_should_run) {
         if (!g_paused) {
             pthread_mutex_lock(&g_lock);
+            
             int dir = 0;
-            if (g_p1_up && !g_p1_down) dir = -1;
-            else if (g_p1_down && !g_p1_up) dir = 1;
+            if (g_game_mode == MODE_CVC) {
+                // CPU controla paleta 1
+                g_cpu_delay_counter++;
+                if (g_cpu_delay_counter >= CPU_REACTION_DELAY) {
+                    dir = cpu_calculate_direction(&g_pad1, g_ball);
+                    g_cpu_delay_counter = 0;
+                }
+            } else {
+                // Jugador controla paleta 1
+                if (g_p1_up && !g_p1_down) dir = -1;
+                else if (g_p1_down && !g_p1_up) dir = 1;
+            }
+            
             move_paddle(&g_pad1, dir);
             pthread_mutex_unlock(&g_lock);
         }
@@ -334,9 +396,21 @@ static void* thread_p2_func(void* arg) {
     while (g_threads_should_run) {
         if (!g_paused) {
             pthread_mutex_lock(&g_lock);
+            
             int dir = 0;
-            if (g_p2_up && !g_p2_down) dir = -1;
-            else if (g_p2_down && !g_p2_up) dir = 1;
+            if (g_game_mode == MODE_PVC || g_game_mode == MODE_CVC) {
+                // CPU controla paleta 2
+                g_cpu_delay_counter++;
+                if (g_cpu_delay_counter >= CPU_REACTION_DELAY) {
+                    dir = cpu_calculate_direction(&g_pad2, g_ball);
+                    g_cpu_delay_counter = 0;
+                }
+            } else {
+                // Jugador controla paleta 2
+                if (g_p2_up && !g_p2_down) dir = -1;
+                else if (g_p2_down && !g_p2_up) dir = 1;
+            }
+            
             move_paddle(&g_pad2, dir);
             pthread_mutex_unlock(&g_lock);
         }
@@ -350,15 +424,14 @@ static void input_names_screen() {
     nodelay(stdscr, FALSE);
     keypad(stdscr, TRUE);
     clear();
-    mvprintw(0, 2, "NOMBRES DE JUGADORES");
-    mvprintw(2, 2, "Ingresa nombre para Jugador 1 (W/S):");
+    mvprintw(0, 2, "NOMBRE DEL JUGADOR");
+    mvprintw(2, 2, "Ingresa tu nombre:");
     mvprintw(3, 4, "> ");
     refresh();
     read_line_ncurses(g_name1, NAME_MAXLEN, 3, 6);
-    mvprintw(5, 2, "Ingresa nombre para Jugador 2 (Flechas):");
-    mvprintw(6, 4, "> ");
-    refresh();
-    read_line_ncurses(g_name2, NAME_MAXLEN, 6, 6);
+    
+    // El nombre de la CPU se mantiene
+    strncpy(g_name2, "CPU", NAME_MAXLEN);
 }
 
 static int menu_screen() {
@@ -377,7 +450,6 @@ static int menu_screen() {
         clear();
         int H, W; getmaxyx(stdscr, H, W);
 
-        // TÍTULO (ASCII)
         attron(COLOR_PAIR(5) | A_BOLD);
         mvprintw(2, (W-28)/2, "  ____   ____  _   _  ____ ");
         mvprintw(3, (W-28)/2, " |  _ \\ / __ \\| \\ | |/ ___|");
@@ -387,14 +459,12 @@ static int menu_screen() {
         mvprintw(7, (W-28)/2, " |_|    \\____/|_| \\_|\\____|");
         attroff(COLOR_PAIR(5) | A_BOLD);
 
-        // INSTRUCCIONES
         mvprintw(9, (W - strlen("Usa Flechas UP/DOWN y ENTER"))/2, "Usa Flechas UP/DOWN y ENTER");
 
         for (int i = 0; i < N; ++i) {
             draw_menu_item(11 + i*3, W, items[i], i == sel);
         }
 
-        // TEXTO DE ABAJO
         mvprintw(H-2, (W - strlen("Q para salir rapido"))/2, "Q para salir rapido");
 
         refresh();
@@ -406,8 +476,6 @@ static int menu_screen() {
     }
 }
 
-
-//selección de modo
 static int mode_screen() {
     const char* items[] = {
         "JUGADOR VS JUGADOR",
@@ -422,26 +490,29 @@ static int mode_screen() {
     while (1) {
         clear();
         int H, W; getmaxyx(stdscr, H, W);
-        //TITULO
+        
+        attron(COLOR_PAIR(4) | A_BOLD);
         mvprintw(2, (W - strlen("SELECCIONA UN MODO DE JUEGO")) / 2, "SELECCIONA UN MODO DE JUEGO");
-        // INSTRUCCIONES
+        attroff(COLOR_PAIR(4) | A_BOLD);
+        
         mvprintw(4, (W - strlen("Usa Flechas UP/DOWN y ENTER"))/2, "Usa Flechas UP/DOWN y ENTER");
-        //OPCIONES
-        int start_y = H/2 - (N * 2); // posicionar aprox. en el centro
+        
+        int start_y = H/2 - (N * 2);
         for (int i = 0; i < N; ++i) {
             draw_menu_item(start_y + i*4, W, items[i], i == sel);
         }
-        // TEXTO DE ABAJO
-        mvprintw(H-2, (W - strlen("Q para salir rapido"))/2, "Q para salir rapido");
+        
+        mvprintw(H-2, (W - strlen("Q para volver al menu"))/2, "Q para volver al menu");
         refresh();
+        
         int ch = getch();
         if (ch == KEY_UP) { sel = (sel - 1 + N) % N; }
         else if (ch == KEY_DOWN) { sel = (sel + 1) % N; }
         else if (ch == '\n' || ch == KEY_ENTER) { return sel; }
-        else if (ch == 'q' || ch == 'Q') { return 3; }
+        else if (ch == 'q' || ch == 'Q') { return -1; }
     }
 }
-// Pantalla de instrucciones
+
 static void instructions_screen() {
     nodelay(stdscr, FALSE);
     keypad(stdscr, TRUE);
@@ -449,22 +520,22 @@ static void instructions_screen() {
         clear();
         int H, W;
         getmaxyx(stdscr, H, W);
-        // ---- Título ----
+        
         attron(COLOR_PAIR(4) | A_BOLD);
         mvprintw(2, (W - strlen("INSTRUCCIONES")) / 2, "%s", "INSTRUCCIONES");
         attroff(COLOR_PAIR(4) | A_BOLD);
-        // ---- Objetivo ----
+        
         attron(COLOR_PAIR(3) | A_BOLD);
         mvprintw(5, (W - 40) / 2, "%s", "OBJETIVO");
         attroff(COLOR_PAIR(3) | A_BOLD);
         mvprintw(7, (W - 40) / 2, "Evita que la pelota pase tu borde.");
         mvprintw(8, (W - 40) / 2, "Gana quien llegue a %d puntos.", SCORE_TO_WIN);
-        // ---- Controles ----
+        
         attron(COLOR_PAIR(3) | A_BOLD);
         mvprintw(11, (W - 40) / 2, "%s", "CONTROLES");
         attroff(COLOR_PAIR(3) | A_BOLD);
-        mvprintw(13, (W - 40) / 2, "%s:  W (arriba), S (abajo)", g_name1);
-        mvprintw(14, (W - 40) / 2, "%s:  Flecha UP / DOWN", g_name2);
+        mvprintw(13, (W - 40) / 2, "Jugador 1:  W (arriba), S (abajo)");
+        mvprintw(14, (W - 40) / 2, "Jugador 2:  Flecha UP / DOWN");
         mvprintw(15, (W - 40) / 2, "Globales:  P (pausa), Q (menu)");
 
         mvprintw(H - 3, (W - strlen("Presiona ENTER para volver al menu")) / 2, "%s", "Presiona ENTER para volver al menu");
@@ -503,7 +574,6 @@ static void leaderboard_screen() {
     }
 }
 
-
 static void announce_winner_and_wait(const char* who) {
     int H, W; getmaxyx(stdscr, H, W);
     int cx = W/2;
@@ -520,6 +590,11 @@ static Scene play_screen() {
     keypad(stdscr, TRUE);
     timeout(0);
     reset_world();
+    
+    // Resetear inputs al inicio
+    g_p1_up = 0; g_p1_down = 0;
+    g_p2_up = 0; g_p2_down = 0;
+    
     g_threads_should_run = true;
     pthread_create(&th_ball, NULL, thread_ball_func, NULL);
     pthread_create(&th_p1, NULL, thread_p1_func, NULL);
@@ -531,14 +606,16 @@ static Scene play_screen() {
         while ((ch = getch()) != ERR) {
             if (ch == 'q' || ch == 'Q') { next = SC_MENU; goto END_PLAY; }
             if (ch == 'p' || ch == 'P') { g_paused = !g_paused; }
-            if (ch == 'w' || ch == 'W') g_p1_up = 1;
-            if (ch == 's' || ch == 'S') g_p1_down = 1;
-            if (ch == KEY_UP) g_p2_up = 1;
-            if (ch == KEY_DOWN) g_p2_down = 1;
-            if (ch == 'w' || ch == 'W') g_p1_down = 0;
-            if (ch == 's' || ch == 'S') g_p1_up = 0;
-            if (ch == KEY_UP) g_p2_down = 0;
-            if (ch == KEY_DOWN) g_p2_up = 0;
+            
+            // Solo permitir controles manuales en modos apropiados
+            if (g_game_mode != MODE_CVC) {
+                if (ch == 'w' || ch == 'W') { g_p1_up = 1; g_p1_down = 0; }
+                if (ch == 's' || ch == 'S') { g_p1_down = 1; g_p1_up = 0; }
+            }
+            if (g_game_mode == MODE_PVP) {
+                if (ch == KEY_UP) { g_p2_up = 1; g_p2_down = 0; }
+                if (ch == KEY_DOWN) { g_p2_down = 1; g_p2_up = 0; }
+            }
         }
 
         pthread_mutex_lock(&g_lock);
@@ -555,8 +632,9 @@ static Scene play_screen() {
 
         if (g_score.p1 >= SCORE_TO_WIN || g_score.p2 >= SCORE_TO_WIN) {
             const bool p1win = g_score.p1 > g_score.p2;
-            const char* who = p1win ? "Gana JUGADOR 1" : "Gana JUGADOR 2";
-            announce_winner_and_wait(who);
+            char winner_msg[64];
+            snprintf(winner_msg, sizeof(winner_msg), "GANA %s", p1win ? g_name1 : g_name2);
+            announce_winner_and_wait(winner_msg);
             pthread_mutex_unlock(&g_lock);
 
             // Guardar en leaderboard
@@ -599,17 +677,16 @@ int main(void) {
     srand((unsigned int)time(NULL));
     initscr();
 
-    //Colores
     if (has_colors()) {
-    start_color();
-    use_default_colors();
-    init_pair(1, COLOR_GREEN,   -1);  // Pelota
-    init_pair(2, COLOR_RED, -1);  // Paleta 1
-    init_pair(3, COLOR_BLUE,  -1);  // Paleta 2
-    init_pair(4, COLOR_YELLOW,-1);  // Textos
-    init_pair(5, COLOR_MAGENTA,-1);  // Textos
-    init_pair(6, COLOR_WHITE, COLOR_BLACK); // Fondo con borde negro
-}
+        start_color();
+        use_default_colors();
+        init_pair(1, COLOR_GREEN,   -1);
+        init_pair(2, COLOR_RED, -1);
+        init_pair(3, COLOR_BLUE,  -1);
+        init_pair(4, COLOR_YELLOW,-1);
+        init_pair(5, COLOR_MAGENTA,-1);
+        init_pair(6, COLOR_WHITE, COLOR_BLACK);
+    }
 
     cbreak();
     noecho();
@@ -622,15 +699,27 @@ int main(void) {
             int sel = menu_screen();
             if (sel == 0) {
                 int mode = mode_screen();
-                if (mode == 0) { // Jugador vs Jugador
-                    scene = SC_PLAYING;
-                } else if (mode == 1) { // Jugador vs Computadora
-                    input_names_screen();
-                    scene = SC_PLAYING;
-                } else if (mode == 2) { // Computadora vs Computadora
-                    scene = SC_PLAYING;
-                } else if (mode == 3) { // Q para salir rapido
+                if (mode == -1) {
+                    // Usuario presionó Q, volver al menú
                     scene = SC_MENU;
+                } else if (mode == 0) {
+                    // Jugador vs Jugador
+                    g_game_mode = MODE_PVP;
+                    strncpy(g_name1, "Jugador 1", NAME_MAXLEN);
+                    strncpy(g_name2, "Jugador 2", NAME_MAXLEN);
+                    scene = SC_PLAYING;
+                } else if (mode == 1) {
+                    // Jugador vs Computadora
+                    g_game_mode = MODE_PVC;
+                    input_names_screen();
+                    strncpy(g_name2, "CPU", NAME_MAXLEN);
+                    scene = SC_PLAYING;
+                } else if (mode == 2) {
+                    // Computadora vs Computadora
+                    g_game_mode = MODE_CVC;
+                    strncpy(g_name1, "CPU 1", NAME_MAXLEN);
+                    strncpy(g_name2, "CPU 2", NAME_MAXLEN);
+                    scene = SC_PLAYING;
                 }
             }
             else if (sel == 1) { instructions_screen(); scene = SC_MENU; }
@@ -649,4 +738,3 @@ int main(void) {
     endwin();
     return 0;
 }
-
