@@ -104,7 +104,8 @@ static char g_name2[NAME_MAXLEN+1] = "CPU";
 
 // Modo de juego actual
 static GameMode g_game_mode = MODE_PVP;
-static int g_cpu_delay_counter = 0;
+static int g_cpu1_delay_counter = 0;     //paleta izquierda
+static int g_cpu2_delay_counter = 0;     //paleta derecha
 
 // UTILIDADES
 static void clamp_float(float* v, float mn, float mx) {
@@ -135,7 +136,9 @@ static void reset_world() {
     g_ball.vy = ((rand() % 2) ? 1.0f : -1.0f) * BALL_SPEED_Y;
     g_score.p1 = 0; g_score.p2 = 0;
     g_paused = false;
-    g_cpu_delay_counter = 0;
+    g_cpu1_delay_counter = 0;
+    g_cpu2_delay_counter = 0;
+
 }
 
 static void draw_borders_and_center() {
@@ -403,10 +406,10 @@ static void* thread_p1_func(void* arg) {
             int dir = 0;
             if (g_game_mode == MODE_CVC) {
                 // CPU controla paleta 1
-                g_cpu_delay_counter++;
-                if (g_cpu_delay_counter >= CPU_REACTION_DELAY) {
+                g_cpu1_delay_counter++;
+                if (g_cpu1_delay_counter >= CPU_REACTION_DELAY) {
                     dir = cpu_calculate_direction(&g_pad1, g_ball);
-                    g_cpu_delay_counter = 0;
+                    g_cpu1_delay_counter = 0;
                 }
             } else {
                 if (g_p1_hold_up   > 0 && g_p1_hold_down == 0) dir = -1;
@@ -430,12 +433,12 @@ static void* thread_p2_func(void* arg) {
             int dir = 0;
             if (g_game_mode == MODE_PVC || g_game_mode == MODE_CVC) {
                 // CPU controla paleta 2
-                g_cpu_delay_counter++;
-                if (g_cpu_delay_counter >= CPU_REACTION_DELAY) {
+                g_cpu2_delay_counter++;
+                if (g_cpu2_delay_counter >= CPU_REACTION_DELAY) {
                     dir = cpu_calculate_direction(&g_pad2, g_ball);
-                    g_cpu_delay_counter = 0;
+                    g_cpu2_delay_counter = 0;
                 }
-            }  else {
+            } else {
                 if (g_p2_hold_up   > 0 && g_p2_hold_down == 0) dir = -1;
                 else if (g_p2_hold_down > 0 && g_p2_hold_up == 0) dir = +1;
                 else dir = 0;
@@ -639,8 +642,8 @@ static Scene play_screen() {
                 // J1
                 case 'w': case 'W':
                     g_p1_up = 1;
-                    g_p1_hold_up   = HOLD_FRAMES;   // refresca “hold”
-                    g_p1_hold_down = 0;             // cancela opuesto
+                    g_p1_hold_up   = HOLD_FRAMES;
+                    g_p1_hold_down = 0;
                     break;
                 case 's': case 'S':
                     g_p1_down = 1;
