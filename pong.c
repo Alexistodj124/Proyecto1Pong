@@ -1,7 +1,7 @@
 // PONG - CON MODO CPU VS JUGADOR
 // CC3086 - Programación de microprocesadores
 // Requiere: ncurses y pthreads
-// Compilar: gcc pong.c -o pong -lncursesw -lpthread -lm
+// Compilar: g++ -std=c++17 pong.c -o pong -lncursesw -lpthread -lm
 
 #include <ncurses.h>
 #include <pthread.h>
@@ -158,6 +158,46 @@ static void ball_scale_speed(float new_speed) {
     g_ball.vx *= k;
     g_ball.vy *= k;
 }
+
+static void versus_screen(void) {
+    bool was_nodelay = is_notimeout(stdscr) == FALSE ? false : true;
+
+    int H, W; 
+    getmaxyx(stdscr, H, W);
+
+    for (int i = 3; i >= 1; --i) {
+        clear();
+
+        attron(COLOR_PAIR(5) | A_BOLD);
+        mvprintw(2, (W - (int)strlen("PREPARADOS"))/2, "PREPARADOS");
+        attroff(COLOR_PAIR(5) | A_BOLD);
+
+        attron(A_BOLD | COLOR_PAIR(4));
+        mvprintw(H/2 - 1, (W - (int)(strlen(g_name1) + 4 + strlen(g_name2)))/2,
+                 "%s  VS  %s", g_name1, g_name2);
+        attroff(A_BOLD | COLOR_PAIR(4));
+
+        attron(A_BOLD);
+        char buf[8]; snprintf(buf, sizeof(buf), "%d", i);
+        mvprintw(H/2 + 1, (W - (int)strlen(buf))/2, "%s", buf);
+        attroff(A_BOLD);
+
+        const char* hint = "Comenzando...";
+        mvprintw(H - 3, (W - (int)strlen(hint))/2, "%s", hint);
+
+        refresh();
+        napms(1000); // 1 segundo
+    }
+
+    clear();
+    attron(A_BOLD | COLOR_PAIR(3));
+    mvprintw(H/2, (W - (int)strlen("¡A JUGAR!"))/2, "¡A JUGAR!");
+    attroff(A_BOLD | COLOR_PAIR(3));
+    refresh();
+    napms(2000); 
+}
+
+
 
 static void reset_world() {
     int H, W;
@@ -672,6 +712,7 @@ static Scene play_screen() {
     keypad(stdscr, TRUE);
     timeout(0);
     reset_world();
+    versus_screen();
     g_threads_should_run = true;
     pthread_create(&th_ball, NULL, thread_ball_func, NULL);
     pthread_create(&th_p1, NULL, thread_p1_func, NULL);
