@@ -1,7 +1,7 @@
 // PONG - CON MODO CPU VS JUGADOR
 // CC3086 - Programación de microprocesadores
 // Requiere: ncurses y pthreads
-// Compilar: gcc pong.c -o pong -lncurses -lpthread
+// Compilar: gcc pong.c -o pong -lncursesw -lpthread -lm
 
 #include <ncurses.h>
 #include <pthread.h>
@@ -11,6 +11,8 @@
 #include <time.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
+
 
 // CONFIGURACIÓN
 #define TARGET_FPS_PLAY 60
@@ -30,6 +32,9 @@
 #define NAME_MAXLEN 24
 #define LEADERBOARD_FILE "pong_scores.txt"
 #define MAX_LEADER_ENTRIES 200
+
+#define BALL_SPEED_MIN 0.45f
+#define BALL_SPEED_MAX 1.10f
 
 // Configuración de dificultad CPU
 #define CPU_REACTION_DELAY 3  // Frames de delay para la CPU
@@ -113,6 +118,36 @@ static void clamp_float(float* v, float mn, float mx) {
     if (*v > mx) *v = mx;
 }
 
+static float frand_range(float a, float b) {
+    return a + (float)rand() / (float)RAND_MAX * (b - a);
+}
+
+static void ball_spawn_random(bool to_right) {
+    g_ball.x = (float)((g_left + g_right) / 2);
+    g_ball.y = (float)((g_top  + g_bottom) / 2);
+
+    float speed = frand_range(BALL_SPEED_MIN, BALL_SPEED_MAX);
+
+    float angle_y = frand_range(-0.8f, 0.8f);
+    float vx = speed * (to_right ? +1.0f : -1.0f);
+    float vy = speed * 0.6f * angle_y;
+
+    g_ball.vx = vx;
+    g_ball.vy = vy;
+}
+
+static void ball_scale_speed(float new_speed) {
+    float cur = sqrtf(g_ball.vx * g_ball.vx + g_ball.vy * g_ball.vy);
+    if (cur < 1e-6f) {
+        g_ball.vx = (g_ball.vx >= 0 ? +1.0f : -1.0f) * new_speed;
+        g_ball.vy = 0.0f;
+        return;
+    }
+    float k = new_speed / cur;
+    g_ball.vx *= k;
+    g_ball.vy *= k;
+}
+
 static void reset_world() {
     int H, W;
     getmaxyx(stdscr, H, W);
@@ -130,10 +165,8 @@ static void reset_world() {
     g_pad1.y = (g_top + g_bottom) / 2;
     g_pad2.y = (g_top + g_bottom) / 2;
 
-    g_ball.x = (float)((g_left + g_right) / 2);
-    g_ball.y = (float)((g_top + g_bottom) / 2);
-    g_ball.vx = ((rand() % 2) ? 1.0f : -1.0f) * BALL_SPEED_X;
-    g_ball.vy = ((rand() % 2) ? 1.0f : -1.0f) * BALL_SPEED_Y;
+    ball_spawn_random(rand() % 2); 
+
     g_score.p1 = 0; g_score.p2 = 0;
     g_paused = false;
     g_cpu1_delay_counter = 0;
@@ -356,17 +389,12 @@ static void* thread_ball_func(void* arg) {
             // Puntuación
             if ((int)g_ball.x <= g_left) {
                 g_score.p2++;
-                g_ball.x = (float)((g_left + g_right) / 2);
-                g_ball.y = (float)((g_top + g_bottom) / 2);
-                g_ball.vx = +BALL_SPEED_X;
-                g_ball.vy = ((rand() % 2) ? 1 : -1) * BALL_SPEED_Y;
+                ball_spawn_random(true);   // sirve hacia la derecha
             } else if ((int)g_ball.x >= g_right) {
                 g_score.p1++;
-                g_ball.x = (float)((g_left + g_right) / 2);
-                g_ball.y = (float)((g_top + g_bottom) / 2);
-                g_ball.vx = -BALL_SPEED_X;
-                g_ball.vy = ((rand() % 2) ? 1 : -1) * BALL_SPEED_Y;
+                ball_spawn_random(false);  // sirve hacia la izquierda
             }
+
             pthread_mutex_unlock(&g_lock);
         }
         usleep(FRAME_USEC_PLAY);
