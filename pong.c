@@ -12,6 +12,17 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+//Para el calculo de tiempos
+#include <chrono>
+using namespace std::chrono;
+static duration<double> time_ball{0};
+static duration<double> time_p1{0};
+static duration<double> time_p2{0};
+static duration<double> time_menu{0};
+static duration<double> time_instructions{0};
+static duration<double> time_leaderboard{0};
+static duration<double> time_render{0};
+
 
 
 // CONFIGURACIÓN
@@ -352,6 +363,7 @@ static int cpu_calculate_direction(Paddle* cpu_paddle, Ball ball) {
 static void* thread_ball_func(void* arg) {
     (void)arg;
     while (g_threads_should_run) {
+        auto start = high_resolution_clock::now();
         if (!g_paused) {
             pthread_mutex_lock(&g_lock);
             g_ball.x += g_ball.vx;
@@ -397,6 +409,8 @@ static void* thread_ball_func(void* arg) {
 
             pthread_mutex_unlock(&g_lock);
         }
+        auto end = high_resolution_clock::now();
+        time_ball += (end - start);
         usleep(FRAME_USEC_PLAY);
     }
     return NULL;
@@ -429,6 +443,8 @@ static void move_paddle(Paddle* p, int input_dir) {
 static void* thread_p1_func(void* arg) {
     (void)arg;
     while (g_threads_should_run) {
+         auto start = high_resolution_clock::now();
+    
         if (!g_paused) {
             pthread_mutex_lock(&g_lock);
             int dir = 0;
@@ -448,6 +464,8 @@ static void* thread_p1_func(void* arg) {
             move_paddle(&g_pad1, dir);
             pthread_mutex_unlock(&g_lock);
         }
+        auto end = high_resolution_clock::now();
+        time_p1 += (end - start);
         usleep(FRAME_USEC_PLAY);
     }
     return NULL;
@@ -456,6 +474,7 @@ static void* thread_p1_func(void* arg) {
 static void* thread_p2_func(void* arg) {
     (void)arg;
     while (g_threads_should_run) {
+        auto start = high_resolution_clock::now();
         if (!g_paused) {
             pthread_mutex_lock(&g_lock);
             int dir = 0;
@@ -474,6 +493,8 @@ static void* thread_p2_func(void* arg) {
             move_paddle(&g_pad2, dir);
             pthread_mutex_unlock(&g_lock);
         }
+        auto end = high_resolution_clock::now();
+        time_p2 += (end - start);
         usleep(FRAME_USEC_PLAY);
     }
     return NULL;
@@ -699,13 +720,15 @@ static Scene play_screen() {
         if (g_p2_hold_up   > 0) g_p2_hold_up--;
         if (g_p2_hold_down > 0) g_p2_hold_down--;
 
-        
 
         pthread_mutex_lock(&g_lock);
         clear();
+        auto start = high_resolution_clock::now();
         draw_score();
         draw_borders_and_center();
         draw_paddles_and_ball();
+        auto end = high_resolution_clock::now();
+        time_render += (end - start);
 
         if (g_paused) {
             attron(A_BOLD);
@@ -778,7 +801,11 @@ int main(void) {
     Scene scene = SC_MENU;
     while (!g_exit_requested) {
         if (scene == SC_MENU) {
-            int sel = menu_screen();
+            auto start = std::chrono::high_resolution_clock::now();
+            int sel = menu_screen();   // << medir menú
+            auto end = std::chrono::high_resolution_clock::now();
+            time_menu += (end - start);
+
             if (sel == 0) {
                 int mode = mode_screen();
                 if (mode == -1) {
@@ -793,7 +820,12 @@ int main(void) {
                 } else if (mode == 1) {
                     // Jugador vs Computadora
                     g_game_mode = MODE_PVC;
-                    input_names_screen();
+
+                    auto s1 = std::chrono::high_resolution_clock::now();
+                    input_names_screen();   // << medir input nombres
+                    auto e1 = std::chrono::high_resolution_clock::now();
+                    time_menu += (e1 - s1);
+
                     strncpy(g_name2, "CPU", NAME_MAXLEN);
                     scene = SC_PLAYING;
                 } else if (mode == 2) {
@@ -804,19 +836,71 @@ int main(void) {
                     scene = SC_PLAYING;
                 }
             }
-            else if (sel == 1) { instructions_screen(); scene = SC_MENU; }
-            else if (sel == 2) { leaderboard_screen(); scene = SC_MENU; }
-            else if (sel == 3) { g_exit_requested = true; }
-        } else if (scene == SC_PLAYING) {
-            scene = play_screen();
-        } else if (scene == SC_INSTR) {
+            else if (sel == 1) { 
+                auto s = std::chrono::high_resolution_clock::now();
+                instructions_screen();   // << medir instrucciones
+                auto e = std::chrono::high_resolution_clock::now();
+                time_instructions += (e - s);
+
+                scene = SC_MENU; 
+            }
+            else if (sel == 2) { 
+                auto s = std::chrono::high_resolution_clock::now();
+                leaderboard_screen();   // << medir leaderboard
+                auto e = std::chrono::high_resolution_clock::now();
+                time_leaderboard += (e - s);
+
+                scene = SC_MENU; 
+            }
+            else if (sel == 3) { 
+                g_exit_requested = true; 
+            }
+        } 
+        else if (scene == SC_PLAYING) {
+            scene = play_screen();  
+        } 
+        else if (scene == SC_INSTR) {
+            auto s = std::chrono::high_resolution_clock::now();
             instructions_screen();
+            auto e = std::chrono::high_resolution_clock::now();
+            time_instructions += (e - s);
+
             scene = SC_MENU;
-        } else if (scene == SC_LEADER) {
+        } 
+        else if (scene == SC_LEADER) {
+            auto s = std::chrono::high_resolution_clock::now();
             leaderboard_screen();
+            auto e = std::chrono::high_resolution_clock::now();
+            time_leaderboard += (e - s);
+
             scene = SC_MENU;
         }
     }
+
     endwin();
+        // ---- PERFIL FINAL ----
+    double total = time_ball.count() + time_p1.count() + time_p2.count() + 
+                   time_menu.count() + time_instructions.count() +
+                   time_leaderboard.count() + time_render.count();
+
+    printf("\n--- PERFIL DE TIEMPOS ---\n");
+    printf("Bola: %.4f s (%.1f%%)\n", time_ball.count(), 100 * time_ball.count() / total);
+    printf("Paleta 1: %.4f s (%.1f%%)\n", time_p1.count(), 100 * time_p1.count() / total);
+    printf("Paleta 2: %.4f s (%.1f%%)\n", time_p2.count(), 100 * time_p2.count() / total);
+    printf("Menu: %.4f s (%.1f%%)\n", time_menu.count(), 100 * time_menu.count() / total);
+    printf("Instrucciones: %.4f s (%.1f%%)\n", time_instructions.count(), 100 * time_instructions.count() / total);
+    printf("Leaderboard: %.4f s (%.1f%%)\n", time_leaderboard.count(), 100 * time_leaderboard.count() / total);
+    printf("Renderizado: %.4f s (%.1f%%)\n", time_render.count(), 100 * time_render.count() / total);
+    printf("Tiempo total medido: %.4f s\n", total);
+
+    double T_seq = time_menu.count() + time_instructions.count() + time_leaderboard.count() + time_render.count();
+    double T_par = time_ball.count() + time_p1.count() + time_p2.count();
+    double f_seq = T_seq / total;
+    double f_par = 1.0 - T_par / total;
+
+    printf("T_seq: %.4f s\n", T_seq);
+    printf("T_par: %.4f s\n", T_par);
+    printf("f_seq: %.4f\n", f_seq);
+    printf("f_par: %.4f\n", f_par);
     return 0;
 }
