@@ -3,6 +3,8 @@
 // Requiere: ncurses y pthreads
 // Compilar: g++ -std=c++17 pong.c -o pong -lncursesw -lpthread -lm
 
+
+// ===== Includes estándar y de terceros =====
 #include <ncurses.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -15,6 +17,9 @@
 //Para el calculo de tiempos
 #include <chrono>
 using namespace std::chrono;
+// ===== Medición de tiempos (acumuladores globales) =====
+// time_* acumulan segundos invertidos por subsistema para el perfil final.
+
 static duration<double> time_ball{0};
 static duration<double> time_p1{0};
 static duration<double> time_p2{0};
@@ -25,7 +30,9 @@ static duration<double> time_render{0};
 
 
 
-// CONFIGURACIÓN
+// ===== Configuración del juego (constantes y macros) =====
+// Ajusta FPS, dimensiones, física de paletas y límites de velocidad de la bola.
+
 #define TARGET_FPS_PLAY 60
 #define FRAME_USEC_PLAY (1000000 / TARGET_FPS_PLAY)
 
@@ -47,17 +54,23 @@ static duration<double> time_render{0};
 #define BALL_SPEED_MIN 0.45f
 #define BALL_SPEED_MAX 1.10f
 
+// ===== Ventanas de ncurses (capa estática y dinámica) =====
+// g_win_static: bordes/cancha (se dibuja una vez).
+// g_win_dynamic: elementos que cambian cada frame (HUD, paletas, bola, pausa).
+
 static WINDOW* g_win_static  = NULL;
 static WINDOW* g_win_dynamic = NULL;
 
 
-// Configuración de dificultad CPU
+// ===== Dificultad/IA: reacción y margen de error =====
 #define CPU_REACTION_DELAY 3  // Frames de delay para la CPU
 #define CPU_ERROR_MARGIN 1.5f // Margen de error en la predicción
 
 #define HOLD_FRAMES 4
 
-// ESTADO GLOBAL
+// ===== Estado global del juego (structs y enums) =====
+// Ball, Paddle, Score, Entry, Scene, GameMode.
+
 typedef struct {
     float x, y;
     float vx, vy;
@@ -96,6 +109,8 @@ typedef enum {
     MODE_CVC           // Computadora vs Computadora
 } GameMode;
 
+// ===== Flags de control de hilos y entradas =====
+
 static bool g_p1_ai = false;
 static bool g_p2_ai = false;
 static int g_p1_hold_up = 0, g_p1_hold_down = 0;
@@ -109,7 +124,8 @@ static volatile bool g_exit_requested = false;
 static volatile int g_p1_up = 0, g_p1_down = 0;
 static volatile int g_p2_up = 0, g_p2_down = 0;
 
-// Elementos del juego
+// ===== Objetos del juego y límites del campo =====
+
 static Ball   g_ball;
 static Paddle g_pad1, g_pad2;
 static Score  g_score;
@@ -127,16 +143,20 @@ static GameMode g_game_mode = MODE_PVP;
 static int g_cpu1_delay_counter = 0;     //paleta izquierda
 static int g_cpu2_delay_counter = 0;     //paleta derecha
 
-// UTILIDADES
+/** @brief Limita un float en [mn, mx]. */
 static void clamp_float(float* v, float mn, float mx) {
     if (*v < mn) *v = mn;
     if (*v > mx) *v = mx;
 }
 
+/** @brief Random uniforme en [a, b]. */
 static float frand_range(float a, float b) {
     return a + (float)rand() / (float)RAND_MAX * (b - a);
 }
 
+/** @brief Reposiciona la bola en el centro con velocidad aleatoria hacia un lado.
+ *  @param to_right true: sirve a la derecha; false: a la izquierda.
+ */
 static void ball_spawn_random(bool to_right) {
     g_ball.x = (float)((g_left + g_right) / 2);
     g_ball.y = (float)((g_top  + g_bottom) / 2);
@@ -151,6 +171,7 @@ static void ball_spawn_random(bool to_right) {
     g_ball.vy = vy;
 }
 
+/** @brief Reescala la velocidad manteniendo la dirección. */
 static void ball_scale_speed(float new_speed) {
     float cur = sqrtf(g_ball.vx * g_ball.vx + g_ball.vy * g_ball.vy);
     if (cur < 1e-6f) {
@@ -163,6 +184,7 @@ static void ball_scale_speed(float new_speed) {
     g_ball.vy *= k;
 }
 
+/** @brief Pantalla de cuenta regresiva y “¡A JUGAR!”. Bloquea ~5 s. */
 static void versus_screen(void) {
     bool was_nodelay = is_notimeout(stdscr) == FALSE ? false : true;
 
@@ -201,6 +223,7 @@ static void versus_screen(void) {
     napms(2000); 
 }
 
+/** @brief Dibuja bordes y línea central en una ventana dada (modo WIN). */
 static void draw_borders_and_center_win(WINDOW* w) {
     mvwaddch(w, g_top,    g_left,  '+');
     mvwaddch(w, g_top,    g_right, '+');
@@ -220,6 +243,7 @@ static void draw_borders_and_center_win(WINDOW* w) {
     }
 }
 
+/** @brief Dibuja el HUD (título + marcador + tips) en una ventana dada. */
 static void draw_score_win(WINDOW* w) {
     int H, W; getmaxyx(w, H, W);
     mvwprintw(w, 0, 2, "%s: %d", g_name1, g_score.p1);
@@ -235,6 +259,7 @@ static void draw_score_win(WINDOW* w) {
     mvwprintw(w, 1, (W - (int)strlen(instr)) / 2, "%s", instr);
 }
 
+/** @brief Dibuja paletas y bola en una ventana dada. */
 static void draw_paddles_and_ball_win(WINDOW* w) {
     int y1 = (int)g_pad1.y;
     wattron(w, COLOR_PAIR(2) | A_BOLD);
@@ -257,7 +282,11 @@ static void draw_paddles_and_ball_win(WINDOW* w) {
     wattroff(w, COLOR_PAIR(1) | A_BOLD);
 }
 
-
+/** @brief Inicializa límites, paletas, bola, marcador y crea ventanas.
+ *  @details
+ *   - g_win_static se dibuja una sola vez con bordes/centro.
+ *   - g_win_dynamic se usará cada frame (no se hace clear total del stdscr).
+ */
 static void reset_world() {
     int H, W;
     getmaxyx(stdscr, H, W);
@@ -295,6 +324,7 @@ static void reset_world() {
     doupdate();
 }
 
+/** @brief (Versión legacy) Dibuja bordes/centro en stdscr. */
 static void draw_borders_and_center() {
     mvaddch(g_top, g_left, '+');
     mvaddch(g_top, g_right, '+');
@@ -316,6 +346,7 @@ static void draw_borders_and_center() {
     }
 }
 
+/** @brief (Legacy) Dibuja HUD en stdscr. */
 static void draw_score() {
     int H, W;
     getmaxyx(stdscr, H, W);
@@ -333,6 +364,7 @@ static void draw_score() {
     mvprintw(1, (W - (int)strlen(instr)) / 2, "%s", instr);
 }
 
+/** @brief (Legacy) Dibuja paletas y bola en stdscr. */
 static void draw_paddles_and_ball() {
     int y1 = (int)g_pad1.y;
     attron(COLOR_PAIR(2) | A_BOLD);
@@ -355,6 +387,7 @@ static void draw_paddles_and_ball() {
     attroff(COLOR_PAIR(1) | A_BOLD);
 }
 
+/** @brief Dibuja un item de menú centrado con “caja” y resaltado opcional. */
 void draw_menu_item(int y, int W, const char* text, bool selected) {
     int len = strlen(text);
     int box_w = len + 8; 
@@ -371,12 +404,13 @@ void draw_menu_item(int y, int W, const char* text, bool selected) {
     if (selected) attroff(A_REVERSE);
 }
 
-// LEADERBOARD
+/** @brief Crea el archivo de puntajes si no existe. */
 static void ensure_file_exists() {
     FILE* f = fopen(LEADERBOARD_FILE, "a");
     if (f) fclose(f);
 }
 
+/** @brief Ordena Entry por score ganador y fecha (desc). */
 static int cmp_entry(const void* a, const void* b) {
     const Entry* ea = (const Entry*)a;
     const Entry* eb = (const Entry*)b;
@@ -386,6 +420,9 @@ static int cmp_entry(const void* a, const void* b) {
     return 0;
 }
 
+/** @brief Carga hasta maxn entradas del leaderboard desde CSV.
+ *  @return número de entradas leídas.
+ */
 static int load_entries(Entry* arr, int maxn) {
     ensure_file_exists();
     FILE* f = fopen(LEADERBOARD_FILE, "r");
@@ -402,6 +439,7 @@ static int load_entries(Entry* arr, int maxn) {
     return n;
 }
 
+/** @brief Agrega una entrada al leaderboard (append CSV). */
 static void append_entry(const Entry* e) {
     ensure_file_exists();
     FILE* f = fopen(LEADERBOARD_FILE, "a");
@@ -410,7 +448,10 @@ static void append_entry(const Entry* e) {
     fclose(f);
 }
 
-// INPUT DE TEXTO
+/** @brief Lee una línea de texto (bloqueante) con edición básica en ncurses.
+ *  @param out buffer destino (maxlen + '\0')
+ *  @note Muestra y posiciona cursor temporalmente.
+ */
 static void read_line_ncurses(char* out, int maxlen, int y, int x) {
     int len = 0;
     out[0] = '\0';
@@ -439,9 +480,10 @@ static void read_line_ncurses(char* out, int maxlen, int y, int x) {
     if (len == 0) strncpy(out, "Jugador", maxlen);
 }
 
-// ============ LÓGICA DE IA PARA CPU ============
-
-// Calcula hacia dónde debe moverse la CPU
+/** @brief IA: decide dirección de movimiento (-1,0,+1) para una paleta CPU.
+ *  @details Reacciona solo si la bola va hacia la paleta; en caso contrario,
+ *           vuelve hacia el centro. Inyecta error aleatorio (CPU_ERROR_MARGIN).
+ */
 static int cpu_calculate_direction(Paddle* cpu_paddle, Ball ball) {
     // Solo reaccionar si la pelota viene hacia la CPU
     bool ball_coming = (cpu_paddle->x > g_midX && ball.vx > 0) || 
@@ -468,8 +510,9 @@ static int cpu_calculate_direction(Paddle* cpu_paddle, Ball ball) {
     return 0;
 }
 
-// ============ LÓGICA DE THREADS ============
-
+/** @brief Hilo de la bola: integra posición, rebotes, colisiones y puntaje.
+ *  @note Protege todo el update con g_lock. Ajusta time_ball.
+ */
 static void* thread_ball_func(void* arg) {
     (void)arg;
     while (g_threads_should_run) {
@@ -479,6 +522,7 @@ static void* thread_ball_func(void* arg) {
             g_ball.x += g_ball.vx;
             g_ball.y += g_ball.vy;
             
+            // --- Rebote vertical en techo y piso ---
             if (g_ball.y <= g_top + 1) { 
                 g_ball.y = g_top + 1; 
                 g_ball.vy *= -1.0f; 
@@ -488,7 +532,7 @@ static void* thread_ball_func(void* arg) {
                 g_ball.vy *= -1.0f; 
             }
             
-            // Colisión con paleta 1
+            // --- Colisión con paleta izquierda (solo si la bola viene hacia la izquierda) ---
             int y1 = (int)g_pad1.y;
             if ((int)g_ball.x == g_pad1.x + 1 && g_ball.vx < 0) {
                 if ((int)g_ball.y >= y1 - PADDLE_LEN/2 && (int)g_ball.y <= y1 + PADDLE_LEN/2) {
@@ -498,7 +542,7 @@ static void* thread_ball_func(void* arg) {
                 }
             }
             
-            // Colisión con paleta 2
+            // --- Colisión con paleta derecha (solo si la bola viene hacia la derecha) ---
             int y2 = (int)g_pad2.y;
             if ((int)g_ball.x == g_pad2.x - 1 && g_ball.vx > 0) {
                 if ((int)g_ball.y >= y2 - PADDLE_LEN/2 && (int)g_ball.y <= y2 + PADDLE_LEN/2) {
@@ -508,7 +552,7 @@ static void* thread_ball_func(void* arg) {
                 }
             }
             
-            // Puntuación
+            // --- Detección de gol: reinicia bola y suma puntaje ---
             if ((int)g_ball.x <= g_left) {
                 g_score.p2++;
                 ball_spawn_random(true);   // sirve hacia la derecha
@@ -526,9 +570,13 @@ static void* thread_ball_func(void* arg) {
     return NULL;
 }
 
+/** @brief Integra movimiento suave de paleta con aceleración, fricción y clamping.
+ *  @param input_dir -1 arriba, 0 neutro, +1 abajo.
+ */
 static void move_paddle(Paddle* p, int input_dir) {
     p->vy += input_dir * PADDLE_ACC * PADDLE_DT;
 
+    // Acelera según input; aplica fricción cuando no hay input.
     if (input_dir == 0) {
         if (p->vy > 0) {
             p->vy -= PADDLE_FRICTION * PADDLE_DT;
@@ -539,17 +587,20 @@ static void move_paddle(Paddle* p, int input_dir) {
         }
     }
 
+    // Limita velocidad máxima para evitar “teletransportes”.
     if (p->vy > PADDLE_MAX_V)  p->vy = PADDLE_MAX_V;
     if (p->vy < -PADDLE_MAX_V) p->vy = -PADDLE_MAX_V;
 
     p->y += p->vy * PADDLE_DT;
 
+    // Integra posición y recorta contra límites del campo.
     float minY = g_top + 1 + PADDLE_LEN/2;
     float maxY = g_bottom - 1 - PADDLE_LEN/2;
     if (p->y < minY) { p->y = minY; p->vy = 0; }
     if (p->y > maxY) { p->y = maxY; p->vy = 0; }
 }
 
+/** @brief Hilo de paleta 1: lee input/IA y actualiza posición. */
 static void* thread_p1_func(void* arg) {
     (void)arg;
     while (g_threads_should_run) {
@@ -581,6 +632,7 @@ static void* thread_p1_func(void* arg) {
     return NULL;
 }
 
+/** @brief Hilo de paleta 2: lee input/IA y actualiza posición. */
 static void* thread_p2_func(void* arg) {
     (void)arg;
     while (g_threads_should_run) {
@@ -611,7 +663,7 @@ static void* thread_p2_func(void* arg) {
 }
 
 
-// PANTALLAS
+/** @brief Pantalla de pedido de nombre (JvC). Bloqueante. */
 static void input_names_screen() {
     nodelay(stdscr, FALSE);
     keypad(stdscr, TRUE);
@@ -626,6 +678,7 @@ static void input_names_screen() {
     strncpy(g_name2, "CPU", NAME_MAXLEN);
 }
 
+/** @brief Menú principal con selector y retorno de opción. */
 static int menu_screen() {
     const char* items[] = {
         "JUGAR",
@@ -668,6 +721,7 @@ static int menu_screen() {
     }
 }
 
+/** @brief Selector de modo de juego. @return -1 para volver atrás. */
 static int mode_screen() {
     const char* items[] = {
         "JUGADOR VS JUGADOR",
@@ -705,6 +759,7 @@ static int mode_screen() {
     }
 }
 
+/** @brief Pantalla de instrucciones (bloqueante hasta ENTER). */
 static void instructions_screen() {
     nodelay(stdscr, FALSE);
     keypad(stdscr, TRUE);
@@ -738,6 +793,7 @@ static void instructions_screen() {
     }
 }
 
+/** @brief Lista el Top N del leaderboard. ENTER para volver. */
 static void leaderboard_screen() {
     nodelay(stdscr, FALSE);
     keypad(stdscr, TRUE);
@@ -766,6 +822,7 @@ static void leaderboard_screen() {
     }
 }
 
+/** @brief Anuncia ganador y muestra atajos para reiniciar o volver a menú. */
 static void announce_winner_and_wait(const char* who) {
     int H, W; getmaxyx(stdscr, H, W);
     int cx = W/2;
@@ -777,6 +834,13 @@ static void announce_winner_and_wait(const char* who) {
     refresh();
 }
 
+/** @brief Loop principal de juego: entrada, render por capas y fin de partida.
+ *  @details
+ *   - Lanza hilos de bola/paletas.
+ *   - Lee teclado no bloqueante.
+ *   - Render: borra dinámica, redibuja cancha/HUD/sprites y compone con doupdate().
+ *   - Condición de victoria -> guarda Entry y espera acción del usuario.
+ */
 static Scene play_screen() {
     nodelay(stdscr, TRUE);
     keypad(stdscr, TRUE);
@@ -831,12 +895,17 @@ static Scene play_screen() {
         if (g_p2_hold_up   > 0) g_p2_hold_up--;
         if (g_p2_hold_down > 0) g_p2_hold_down--;
 
+        // ===== RENDER POR CAPAS =====
+        // - g_win_static contiene bordes/centro (se dibuja 1 sola vez en reset_world()).
+        // - g_win_dynamic se borra cada frame y redibuja TODO lo visible para no tapar el estático.
 
         auto start = high_resolution_clock::now();
 
         pthread_mutex_lock(&g_lock);
 
+        // Limpia solo la ventana dinámica (no stdscr).
         werase(g_win_dynamic);
+        // Redibuja el tablero aquí para que no quede “tapado” por el erase.
         draw_borders_and_center_win(g_win_dynamic);
         draw_score_win(g_win_dynamic);
         draw_paddles_and_ball_win(g_win_dynamic);
@@ -848,6 +917,7 @@ static Scene play_screen() {
             wattroff(g_win_dynamic, A_BOLD);
         }
 
+        // Composición eficiente: wnoutrefresh en ambas ventanas y un solo doupdate().
         wnoutrefresh(g_win_dynamic);
         wnoutrefresh(g_win_static);
         doupdate();
@@ -903,7 +973,7 @@ END_PLAY:
     return next;
 }
 
-// MAIN
+/** @brief Punto de entrada: init ncurses, bucle de escenas y reporte de tiempos. */
 int main(void) {
     srand((unsigned int)time(NULL));
     initscr();
