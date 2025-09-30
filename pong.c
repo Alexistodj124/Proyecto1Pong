@@ -872,7 +872,6 @@ int main(void) {
             leaderboard_screen();
             auto e = std::chrono::high_resolution_clock::now();
             time_leaderboard += (e - s);
-
             scene = SC_MENU;
         }
     }
@@ -896,7 +895,7 @@ int main(void) {
     double T_seq = time_menu.count() + time_instructions.count() + time_leaderboard.count() + time_render.count();
     double T_par = time_ball.count() + time_p1.count() + time_p2.count();
     double f_seq = T_seq / total;
-    double f_par = 1.0 - T_par / total;
+    double f_par = T_par / total;
 
     printf("T_seq: %.4f s\n", T_seq);
     printf("T_par: %.4f s\n", T_par);
