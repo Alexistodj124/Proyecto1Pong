@@ -47,6 +47,10 @@ static duration<double> time_render{0};
 #define BALL_SPEED_MIN 0.45f
 #define BALL_SPEED_MAX 1.10f
 
+static WINDOW* g_win_static  = NULL;
+static WINDOW* g_win_dynamic = NULL;
+
+
 // Configuración de dificultad CPU
 #define CPU_REACTION_DELAY 3  // Frames de delay para la CPU
 #define CPU_ERROR_MARGIN 1.5f // Margen de error en la predicción
@@ -197,6 +201,61 @@ static void versus_screen(void) {
     napms(2000); 
 }
 
+static void draw_borders_and_center_win(WINDOW* w) {
+    mvwaddch(w, g_top,    g_left,  '+');
+    mvwaddch(w, g_top,    g_right, '+');
+    mvwaddch(w, g_bottom, g_left,  '+');
+    mvwaddch(w, g_bottom, g_right, '+');
+
+    for (int x = g_left + 1; x < g_right; ++x) {
+        mvwaddch(w, g_top,    x, '-');
+        mvwaddch(w, g_bottom, x, '-');
+    }
+    for (int y = g_top + 1; y < g_bottom; ++y) {
+        mvwaddch(w, y, g_left,  '|');
+        mvwaddch(w, y, g_right, '|');
+    }
+    for (int y = g_top + 1; y < g_bottom; y += 2) {
+        mvwaddch(w, y, g_midX, ':');
+    }
+}
+
+static void draw_score_win(WINDOW* w) {
+    int H, W; getmaxyx(w, H, W);
+    mvwprintw(w, 0, 2, "%s: %d", g_name1, g_score.p1);
+    char right_buf[64];
+    snprintf(right_buf, sizeof(right_buf), "%s: %d", g_name2, g_score.p2);
+    mvwprintw(w, 0, W - (int)strlen(right_buf) - 2, "%s", right_buf);
+
+    wattron(w, A_BOLD | COLOR_PAIR(5));
+    mvwprintw(w, 0, (W - (int)strlen("PONG")) / 2, "PONG");
+    wattroff(w, A_BOLD | COLOR_PAIR(5));
+
+    const char* instr = "(P: pausa, Q: menu)";
+    mvwprintw(w, 1, (W - (int)strlen(instr)) / 2, "%s", instr);
+}
+
+static void draw_paddles_and_ball_win(WINDOW* w) {
+    int y1 = (int)g_pad1.y;
+    wattron(w, COLOR_PAIR(2) | A_BOLD);
+    for (int k = -PADDLE_LEN/2; k <= PADDLE_LEN/2; ++k) {
+        int yy = y1 + k;
+        if (yy > g_top && yy < g_bottom) mvwaddch(w, yy, g_pad1.x, '|');
+    }
+    wattroff(w, COLOR_PAIR(2) | A_BOLD);
+
+    int y2 = (int)g_pad2.y;
+    wattron(w, COLOR_PAIR(3) | A_BOLD);
+    for (int k = -PADDLE_LEN/2; k <= PADDLE_LEN/2; ++k) {
+        int yy = y2 + k;
+        if (yy > g_top && yy < g_bottom) mvwaddch(w, yy, g_pad2.x, '|');
+    }
+    wattroff(w, COLOR_PAIR(3) | A_BOLD);
+
+    wattron(w, COLOR_PAIR(1) | A_BOLD);
+    mvwaddch(w, (int)g_ball.y, (int)g_ball.x, 'O');
+    wattroff(w, COLOR_PAIR(1) | A_BOLD);
+}
 
 
 static void reset_world() {
@@ -223,6 +282,17 @@ static void reset_world() {
     g_cpu1_delay_counter = 0;
     g_cpu2_delay_counter = 0;
 
+    if (g_win_static)  { delwin(g_win_static);  g_win_static  = NULL; }
+    if (g_win_dynamic) { delwin(g_win_dynamic); g_win_dynamic = NULL; }
+
+    g_win_static  = newwin(H, W, 0, 0);
+    g_win_dynamic = newwin(H, W, 0, 0);
+
+    // Dibujar lo ESTÁTICO solo una vez
+    werase(g_win_static);
+    draw_borders_and_center_win(g_win_static);
+    wnoutrefresh(g_win_static);
+    doupdate();
 }
 
 static void draw_borders_and_center() {
@@ -762,14 +832,32 @@ static Scene play_screen() {
         if (g_p2_hold_down > 0) g_p2_hold_down--;
 
 
-        pthread_mutex_lock(&g_lock);
-        clear();
         auto start = high_resolution_clock::now();
-        draw_score();
-        draw_borders_and_center();
-        draw_paddles_and_ball();
+
+        pthread_mutex_lock(&g_lock);
+
+        werase(g_win_dynamic);
+        draw_borders_and_center_win(g_win_dynamic);
+        draw_score_win(g_win_dynamic);
+        draw_paddles_and_ball_win(g_win_dynamic);
+
+
+        if (g_paused) {
+            wattron(g_win_dynamic, A_BOLD);
+            mvwprintw(g_win_dynamic, (g_top + g_bottom)/2, g_midX - 2, "PAUSA");
+            wattroff(g_win_dynamic, A_BOLD);
+        }
+
+        wnoutrefresh(g_win_dynamic);
+        wnoutrefresh(g_win_static);
+        doupdate();
+
+
+        pthread_mutex_unlock(&g_lock);
+
         auto end = high_resolution_clock::now();
         time_render += (end - start);
+
 
         if (g_paused) {
             attron(A_BOLD);
@@ -802,9 +890,6 @@ static Scene play_screen() {
                     break;
                 }
             }
-        } else {
-            refresh();
-            pthread_mutex_unlock(&g_lock);
         }
         usleep(FRAME_USEC_PLAY);
     }
@@ -916,6 +1001,8 @@ int main(void) {
             scene = SC_MENU;
         }
     }
+    if (g_win_dynamic) delwin(g_win_dynamic);
+    if (g_win_static)  delwin(g_win_static);
 
     endwin();
         // ---- PERFIL FINAL ----
