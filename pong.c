@@ -22,6 +22,11 @@
 #define BALL_SPEED_Y 0.4f
 #define SCORE_TO_WIN 7
 
+#define PADDLE_DT        (1.0f / TARGET_FPS_PLAY)
+#define PADDLE_ACC       500.0f
+#define PADDLE_MAX_V     30.0f
+#define PADDLE_FRICTION  30.0f
+
 #define NAME_MAXLEN 24
 #define LEADERBOARD_FILE "pong_scores.txt"
 #define MAX_LEADER_ENTRIES 200
@@ -29,6 +34,8 @@
 // Configuración de dificultad CPU
 #define CPU_REACTION_DELAY 3  // Frames de delay para la CPU
 #define CPU_ERROR_MARGIN 1.5f // Margen de error en la predicción
+
+#define HOLD_FRAMES 4
 
 // ESTADO GLOBAL
 typedef struct {
@@ -39,6 +46,7 @@ typedef struct {
 typedef struct {
     int x;
     float y;
+    float vy;
 } Paddle;
 
 typedef struct {
@@ -68,6 +76,10 @@ typedef enum {
     MODE_CVC           // Computadora vs Computadora
 } GameMode;
 
+static bool g_p1_ai = false;
+static bool g_p2_ai = false;
+static int g_p1_hold_up = 0, g_p1_hold_down = 0;
+static int g_p2_hold_up = 0, g_p2_hold_down = 0;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static volatile bool g_threads_should_run = false;
 static volatile bool g_paused = false;
@@ -103,7 +115,9 @@ static void clamp_float(float* v, float mn, float mx) {
 static void reset_world() {
     int H, W;
     getmaxyx(stdscr, H, W);
-    
+    g_pad1.vy = 0.0f;
+    g_pad2.vy = 0.0f;
+
     g_top = 2;
     g_bottom = H - 2;
     g_left = 2;
@@ -357,10 +371,28 @@ static void* thread_ball_func(void* arg) {
     return NULL;
 }
 
-static void move_paddle(Paddle* p, int dir) {
-    if (dir == -1) p->y -= PADDLE_SPEED;
-    else if (dir == 1) p->y += PADDLE_SPEED;
-    clamp_float(&p->y, g_top + 1 + PADDLE_LEN/2, g_bottom - 1 - PADDLE_LEN/2);
+static void move_paddle(Paddle* p, int input_dir) {
+    p->vy += input_dir * PADDLE_ACC * PADDLE_DT;
+
+    if (input_dir == 0) {
+        if (p->vy > 0) {
+            p->vy -= PADDLE_FRICTION * PADDLE_DT;
+            if (p->vy < 0) p->vy = 0;
+        } else if (p->vy < 0) {
+            p->vy += PADDLE_FRICTION * PADDLE_DT;
+            if (p->vy > 0) p->vy = 0;
+        }
+    }
+
+    if (p->vy > PADDLE_MAX_V)  p->vy = PADDLE_MAX_V;
+    if (p->vy < -PADDLE_MAX_V) p->vy = -PADDLE_MAX_V;
+
+    p->y += p->vy * PADDLE_DT;
+
+    float minY = g_top + 1 + PADDLE_LEN/2;
+    float maxY = g_bottom - 1 - PADDLE_LEN/2;
+    if (p->y < minY) { p->y = minY; p->vy = 0; }
+    if (p->y > maxY) { p->y = maxY; p->vy = 0; }
 }
 
 static void* thread_p1_func(void* arg) {
@@ -368,7 +400,6 @@ static void* thread_p1_func(void* arg) {
     while (g_threads_should_run) {
         if (!g_paused) {
             pthread_mutex_lock(&g_lock);
-            
             int dir = 0;
             if (g_game_mode == MODE_CVC) {
                 // CPU controla paleta 1
@@ -378,11 +409,11 @@ static void* thread_p1_func(void* arg) {
                     g_cpu_delay_counter = 0;
                 }
             } else {
-                // Jugador controla paleta 1
-                if (g_p1_up && !g_p1_down) dir = -1;
-                else if (g_p1_down && !g_p1_up) dir = 1;
+                if (g_p1_hold_up   > 0 && g_p1_hold_down == 0) dir = -1;
+                else if (g_p1_hold_down > 0 && g_p1_hold_up == 0) dir = +1;
+                else dir = 0;
             }
-            
+            // update_paddle(...) si usas modelo suave; o move_paddle(...) si usas step fijo
             move_paddle(&g_pad1, dir);
             pthread_mutex_unlock(&g_lock);
         }
@@ -396,7 +427,6 @@ static void* thread_p2_func(void* arg) {
     while (g_threads_should_run) {
         if (!g_paused) {
             pthread_mutex_lock(&g_lock);
-            
             int dir = 0;
             if (g_game_mode == MODE_PVC || g_game_mode == MODE_CVC) {
                 // CPU controla paleta 2
@@ -405,12 +435,11 @@ static void* thread_p2_func(void* arg) {
                     dir = cpu_calculate_direction(&g_pad2, g_ball);
                     g_cpu_delay_counter = 0;
                 }
-            } else {
-                // Jugador controla paleta 2
-                if (g_p2_up && !g_p2_down) dir = -1;
-                else if (g_p2_down && !g_p2_up) dir = 1;
+            }  else {
+                if (g_p2_hold_up   > 0 && g_p2_hold_down == 0) dir = -1;
+                else if (g_p2_hold_down > 0 && g_p2_hold_up == 0) dir = +1;
+                else dir = 0;
             }
-            
             move_paddle(&g_pad2, dir);
             pthread_mutex_unlock(&g_lock);
         }
@@ -418,6 +447,7 @@ static void* thread_p2_func(void* arg) {
     }
     return NULL;
 }
+
 
 // PANTALLAS
 static void input_names_screen() {
@@ -590,11 +620,6 @@ static Scene play_screen() {
     keypad(stdscr, TRUE);
     timeout(0);
     reset_world();
-    
-    // Resetear inputs al inicio
-    g_p1_up = 0; g_p1_down = 0;
-    g_p2_up = 0; g_p2_down = 0;
-    
     g_threads_should_run = true;
     pthread_create(&th_ball, NULL, thread_ball_func, NULL);
     pthread_create(&th_p1, NULL, thread_p1_func, NULL);
@@ -602,21 +627,48 @@ static Scene play_screen() {
 
     Scene next = SC_MENU;
     while (!g_exit_requested) {
+        // reset “flags instantáneas”
+        g_p1_up = g_p1_down = g_p2_up = g_p2_down = 0;
+
         int ch;
         while ((ch = getch()) != ERR) {
-            if (ch == 'q' || ch == 'Q') { next = SC_MENU; goto END_PLAY; }
-            if (ch == 'p' || ch == 'P') { g_paused = !g_paused; }
-            
-            // Solo permitir controles manuales en modos apropiados
-            if (g_game_mode != MODE_CVC) {
-                if (ch == 'w' || ch == 'W') { g_p1_up = 1; g_p1_down = 0; }
-                if (ch == 's' || ch == 'S') { g_p1_down = 1; g_p1_up = 0; }
-            }
-            if (g_game_mode == MODE_PVP) {
-                if (ch == KEY_UP) { g_p2_up = 1; g_p2_down = 0; }
-                if (ch == KEY_DOWN) { g_p2_down = 1; g_p2_up = 0; }
+            switch (ch) {
+                case 'q': case 'Q': next = SC_MENU; goto END_PLAY;
+                case 'p': case 'P': g_paused = !g_paused; break;
+
+                // J1
+                case 'w': case 'W':
+                    g_p1_up = 1;
+                    g_p1_hold_up   = HOLD_FRAMES;   // refresca “hold”
+                    g_p1_hold_down = 0;             // cancela opuesto
+                    break;
+                case 's': case 'S':
+                    g_p1_down = 1;
+                    g_p1_hold_down = HOLD_FRAMES;
+                    g_p1_hold_up   = 0;
+                    break;
+
+                // J2
+                case KEY_UP:
+                    g_p2_up = 1;
+                    g_p2_hold_up   = HOLD_FRAMES;
+                    g_p2_hold_down = 0;
+                    break;
+                case KEY_DOWN:
+                    g_p2_down = 1;
+                    g_p2_hold_down = HOLD_FRAMES;
+                    g_p2_hold_up   = 0;
+                    break;
             }
         }
+
+        // “decay” por frame
+        if (g_p1_hold_up   > 0) g_p1_hold_up--;
+        if (g_p1_hold_down > 0) g_p1_hold_down--;
+        if (g_p2_hold_up   > 0) g_p2_hold_up--;
+        if (g_p2_hold_down > 0) g_p2_hold_down--;
+
+        
 
         pthread_mutex_lock(&g_lock);
         clear();
@@ -632,9 +684,8 @@ static Scene play_screen() {
 
         if (g_score.p1 >= SCORE_TO_WIN || g_score.p2 >= SCORE_TO_WIN) {
             const bool p1win = g_score.p1 > g_score.p2;
-            char winner_msg[64];
-            snprintf(winner_msg, sizeof(winner_msg), "GANA %s", p1win ? g_name1 : g_name2);
-            announce_winner_and_wait(winner_msg);
+            const char* who = p1win ? "Gana JUGADOR 1" : "Gana JUGADOR 2";
+            announce_winner_and_wait(who);
             pthread_mutex_unlock(&g_lock);
 
             // Guardar en leaderboard
